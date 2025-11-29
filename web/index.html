@@ -1,0 +1,459 @@
+<!DOCTYPE html>
+<html lang="zh" class="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Simple AI Trader</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&family=Inter:wght@300;400;600;700&display=swap" rel="stylesheet">
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    fontFamily: {
+                        sans: ['Inter', 'sans-serif'],
+                        mono: ['JetBrains Mono', 'monospace'],
+                    },
+                    colors: {
+                        gray: {
+                            850: '#1f2937',
+                            900: '#111827',
+                            950: '#030712',
+                        }
+                    }
+                }
+            }
+        }
+    </script>
+    <style>
+        body { background-color: #020617; color: #e2e8f0; }
+        .scrollbar-hide::-webkit-scrollbar { display: none; }
+        .scrollbar-hide { -ms-overflow-style: none; scrollbar-width: none; }
+        /* Custom Scrollbar */
+        ::-webkit-scrollbar { width: 6px; height: 6px; }
+        ::-webkit-scrollbar-track { background: #0f172a; }
+        ::-webkit-scrollbar-thumb { background: #334155; border-radius: 3px; }
+        ::-webkit-scrollbar-thumb:hover { background: #475569; }
+        
+        .fade-enter-active, .fade-leave-active { transition: opacity 0.3s ease; }
+        .fade-enter-from, .fade-leave-to { opacity: 0; }
+    </style>
+</head>
+<body class="antialiased min-h-screen flex flex-col">
+    <div id="app" class="flex-1 flex flex-col">
+        
+        <!-- Top Navigation -->
+        <nav class="border-b border-slate-800 bg-slate-900/80 backdrop-blur sticky top-0 z-30">
+            <div class="container mx-auto px-4 h-16 flex items-center justify-between">
+                <div class="flex items-center gap-3">
+                    <div class="bg-blue-600 text-white p-1.5 rounded-lg shadow-lg shadow-blue-500/20">
+                        <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z" />
+                        </svg>
+                    </div>
+                    <h1 class="text-xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-white to-slate-400">
+                        Simple AI Trader
+                    </h1>
+                </div>
+                <div class="flex items-center gap-4">
+                    <div class="hidden md:flex items-center gap-4 text-xs font-mono text-slate-400 bg-slate-800/50 px-3 py-1.5 rounded-full border border-slate-700/50">
+                        <span class="flex items-center gap-1">
+                            <span class="w-2 h-2 bg-green-500 rounded-full animate-pulse"></span>
+                            Running: {{ formatDuration(state.runtime_minutes) }}
+                        </span>
+                        <span class="w-px h-3 bg-slate-600"></span>
+                        <span>Cycles: #{{ state.call_count }}</span>
+                        <span class="w-px h-3 bg-slate-600"></span>
+                        <span>{{ currentTime }}</span>
+                    </div>
+                    <button class="flex items-center gap-2 bg-slate-800/50 text-slate-400 px-3 py-2 rounded-lg text-sm font-medium border border-slate-700/50 cursor-default">
+                        <span class="hidden sm:inline">v2.0 Dashboard</span>
+                    </button>
+                </div>
+            </div>
+        </nav>
+
+        <main class="container mx-auto px-4 py-6 space-y-6 flex-1">
+            
+            <!-- KPI Grid -->
+            <div v-if="state.account" class="grid grid-cols-2 md:grid-cols-4 gap-4">
+                <!-- Total Equity -->
+                <div class="bg-slate-900 rounded-xl p-4 border border-slate-800 relative overflow-hidden group">
+                    <div class="absolute top-0 right-0 p-3 opacity-10 group-hover:opacity-20 transition">
+                        <svg xmlns="http://www.w3.org/2000/svg" class="h-12 w-12 text-blue-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                        </svg>
+                    </div>
+                    <div class="text-slate-400 text-xs font-medium uppercase tracking-wider mb-1">Total Equity</div>
+                    <div class="text-2xl font-bold font-mono text-white">${{ formatMoney(state.account.total_equity) }}</div>
+                </div>
+                
+                <!-- Available Balance -->
+                <div class="bg-slate-900 rounded-xl p-4 border border-slate-800">
+                    <div class="text-slate-400 text-xs font-medium uppercase tracking-wider mb-1">Available Balance</div>
+                    <div class="text-2xl font-bold font-mono text-slate-200">${{ formatMoney(state.account.available_balance) }}</div>
+                </div>
+
+                <!-- Unrealized PnL -->
+                <div class="bg-slate-900 rounded-xl p-4 border border-slate-800">
+                    <div class="text-slate-400 text-xs font-medium uppercase tracking-wider mb-1">Unrealized PnL</div>
+                    <div class="text-2xl font-bold font-mono" :class="getPnLColor(state.account.unrealized_pnl)">
+                        {{ state.account.unrealized_pnl >= 0 ? '+' : '' }}{{ formatMoney(state.account.unrealized_pnl) }}
+                    </div>
+                </div>
+
+                <!-- Total PnL % -->
+                <div class="bg-slate-900 rounded-xl p-4 border border-slate-800">
+                    <div class="text-slate-400 text-xs font-medium uppercase tracking-wider mb-1">Total PnL</div>
+                    <div class="flex items-baseline gap-2">
+                         <span class="text-2xl font-bold font-mono" :class="getPnLColor(state.account.total_pnl)">
+                            {{ state.account.total_pnl >= 0 ? '+' : '' }}{{ formatMoney(state.account.total_pnl) }}
+                        </span>
+                        <span class="text-sm font-mono" :class="getPnLColor(state.account.total_pnl)">
+                            ({{ state.account.total_pnl_pct.toFixed(2) }}%)
+                        </span>
+                    </div>
+                </div>
+            </div>
+            <div v-else class="h-24 bg-slate-900/50 rounded-xl animate-pulse"></div>
+
+            <!-- Market Ticker -->
+            <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-3">
+                <div v-for="(data, symbol) in marketData" :key="symbol" class="bg-slate-900 hover:bg-slate-800 border border-slate-800 hover:border-slate-700 p-3 rounded-lg transition group">
+                    <div class="flex justify-between items-start mb-1">
+                        <span class="font-bold text-sm text-slate-200">{{ symbol }}</span>
+                        <span class="text-xs font-mono px-1.5 py-0.5 rounded" :class="data.PriceChange1h >= 0 ? 'bg-emerald-500/10 text-emerald-400' : 'bg-rose-500/10 text-rose-400'">
+                            {{ (data.PriceChange1h*100).toFixed(2) }}%
+                        </span>
+                    </div>
+                    <div class="font-mono text-lg font-semibold text-white group-hover:text-blue-400 transition-colors">
+                        ${{ formatPrice(data.CurrentPrice) }}
+                    </div>
+                </div>
+            </div>
+
+            <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                
+                <!-- Left Column -->
+                <div class="lg:col-span-2 space-y-6">
+                    
+                    <!-- Positions -->
+                    <div class="bg-slate-900 rounded-xl border border-slate-800 overflow-hidden">
+                        <div class="px-4 py-3 border-b border-slate-800 flex justify-between items-center bg-slate-900/50">
+                            <h2 class="font-semibold text-slate-200 flex items-center gap-2">
+                                📥 Active Positions
+                                <span v-if="state.positions" class="bg-slate-800 text-xs px-2 py-0.5 rounded-full text-slate-400">{{ state.positions.length }}</span>
+                            </h2>
+                            <div class="text-xs text-slate-500" v-if="state.account">Margin Used: {{ state.account.margin_used_pct.toFixed(1) }}%</div>
+                        </div>
+                        
+                        <div class="overflow-x-auto">
+                            <table class="w-full text-sm text-left" v-if="state.positions && state.positions.length > 0">
+                                <thead class="text-xs text-slate-400 uppercase bg-slate-950/50">
+                                    <tr>
+                                        <th class="px-4 py-3 font-medium">Symbol</th>
+                                        <th class="px-4 py-3 font-medium">Side</th>
+                                        <th class="px-4 py-3 font-medium">Size</th>
+                                        <th class="px-4 py-3 font-medium">Entry</th>
+                                        <th class="px-4 py-3 font-medium">Mark</th>
+                                        <th class="px-4 py-3 font-medium text-right">PnL (ROE)</th>
+                                    </tr>
+                                </thead>
+                                <tbody class="divide-y divide-slate-800">
+                                    <tr v-for="pos in state.positions" :key="pos.symbol" class="hover:bg-slate-800/50 transition-colors">
+                                        <td class="px-4 py-3 font-bold text-white">{{ pos.symbol }}</td>
+                                        <td class="px-4 py-3">
+                                            <span :class="pos.side === 'long' ? 'text-emerald-400 bg-emerald-500/10' : 'text-rose-400 bg-rose-500/10'" class="px-2 py-1 rounded text-xs font-bold uppercase">
+                                                {{ pos.side }} {{ pos.leverage }}x
+                                            </span>
+                                        </td>
+                                        <td class="px-4 py-3 text-slate-300">{{ pos.quantity }}</td>
+                                        <td class="px-4 py-3 font-mono text-slate-400">{{ formatPrice(pos.entry_price) }}</td>
+                                        <td class="px-4 py-3 font-mono text-slate-300">{{ formatPrice(pos.mark_price) }}</td>
+                                        <td class="px-4 py-3 text-right font-mono">
+                                            <div :class="getPnLColor(pos.unrealized_pnl)">
+                                                {{ pos.unrealized_pnl >= 0 ? '+' : '' }}{{ formatMoney(pos.unrealized_pnl) }}
+                                            </div>
+                                            <div class="text-xs opacity-70" :class="getPnLColor(pos.unrealized_pnl_pct)">
+                                                {{ pos.unrealized_pnl_pct.toFixed(2) }}%
+                                            </div>
+                                        </td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                            <div v-else class="p-8 text-center text-slate-500 flex flex-col items-center justify-center">
+                                <svg xmlns="http://www.w3.org/2000/svg" class="h-10 w-10 mb-2 opacity-20" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20 12H4" />
+                                </svg>
+                                <p>No active positions</p>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- AI Context Tabs -->
+                    <div class="bg-slate-900 rounded-xl border border-slate-800 overflow-hidden flex flex-col h-[500px]">
+                        <div class="flex border-b border-slate-800">
+                            <button 
+                                v-for="tab in tabs" 
+                                :key="tab.id"
+                                @click="activeTab = tab.id"
+                                class="px-4 py-3 text-sm font-medium transition-colors border-b-2 focus:outline-none"
+                                :class="activeTab === tab.id ? 'border-blue-500 text-blue-400 bg-slate-800/50' : 'border-transparent text-slate-400 hover:text-slate-200 hover:bg-slate-800/30'"
+                            >
+                                {{ tab.name }}
+                            </button>
+                        </div>
+                        <div class="flex-1 overflow-hidden relative bg-slate-950/30">
+                            <div v-if="decision" class="absolute inset-0 p-4 overflow-y-auto font-mono text-xs leading-relaxed whitespace-pre-wrap text-slate-300 scrollbar-thin">
+                                <div v-if="activeTab === 'reasoning'">
+                                    <div class="text-yellow-500/80 mb-2 font-bold uppercase tracking-wider text-[10px]">Chain of Thought Trace</div>
+                                    {{ decision.cot_trace }}
+                                </div>
+                                <div v-else-if="activeTab === 'user_prompt'">
+                                    <div class="text-blue-500/80 mb-2 font-bold uppercase tracking-wider text-[10px]">User Prompt</div>
+                                    {{ decision.user_prompt }}
+                                </div>
+                                <div v-else-if="activeTab === 'system_prompt'">
+                                    <div class="text-purple-500/80 mb-2 font-bold uppercase tracking-wider text-[10px]">System Prompt</div>
+                                    {{ decision.system_prompt }}
+                                </div>
+                            </div>
+                            <div v-else class="flex items-center justify-center h-full text-slate-500">
+                                Waiting for AI decision...
+                            </div>
+                        </div>
+                    </div>
+
+                </div>
+
+                <!-- Right Column -->
+                <div class="space-y-6">
+                    
+                    <!-- Latest Decision -->
+                    <div class="bg-slate-900 rounded-xl border border-slate-800 overflow-hidden">
+                        <div class="px-4 py-3 border-b border-slate-800 bg-gradient-to-r from-slate-900 to-slate-800">
+                            <h2 class="font-semibold text-slate-200">⚡ Latest Actions</h2>
+                        </div>
+                        <div class="p-4 max-h-[400px] overflow-y-auto space-y-3">
+                            <div v-if="decision && decision.decisions && decision.decisions.length > 0">
+                                <div v-for="(d, idx) in decision.decisions" :key="idx" class="bg-slate-800/50 rounded-lg p-3 border-l-4" :class="getActionBorderColor(d.action)">
+                                    <div class="flex justify-between items-center mb-2">
+                                        <div class="flex items-center gap-2">
+                                            <span class="font-bold text-white">{{ d.symbol }}</span>
+                                            <span class="text-xs font-bold uppercase px-2 py-0.5 rounded bg-slate-900 text-slate-300">{{ d.action }}</span>
+                                        </div>
+                                        <div v-if="d.confidence" class="text-xs font-bold px-2 py-0.5 rounded" :class="d.confidence >= 80 ? 'bg-yellow-500/20 text-yellow-400' : 'bg-blue-500/20 text-blue-400'">
+                                            {{ d.confidence }}% Conf.
+                                        </div>
+                                    </div>
+                                    
+                                    <p class="text-xs text-slate-400 mb-3 leading-relaxed border-b border-slate-700/50 pb-2">{{ d.reasoning }}</p>
+                                    
+                                    <div class="grid grid-cols-2 gap-x-4 gap-y-2 text-[10px] font-mono text-slate-400">
+                                        <div v-if="d.invalidation_condition" class="col-span-2 flex gap-2 border-b border-slate-800/50 pb-2 mb-1">
+                                            <span class="text-slate-500">Invalidation:</span>
+                                            <span class="text-slate-300">{{ d.invalidation_condition }}</span>
+                                        </div>
+                                        
+                                        <div v-if="d.action.includes('open')" class="contents">
+                                            <div class="flex justify-between">
+                                                <span class="text-slate-500">Size:</span>
+                                                <span class="text-slate-200">${{ d.position_size_usd }} ({{ d.leverage }}x)</span>
+                                            </div>
+                                            <div class="flex justify-between">
+                                                 <span class="text-slate-500">Risk:</span>
+                                                 <span class="text-rose-400">${{ d.risk_usd }}</span>
+                                            </div>
+                                            <div class="flex justify-between">
+                                                <span class="text-slate-500">Stop Loss:</span>
+                                                <span class="text-rose-400">{{ formatPrice(d.stop_loss) }}</span>
+                                            </div>
+                                            <div class="flex justify-between">
+                                                <span class="text-slate-500">Target:</span>
+                                                <span class="text-emerald-400">{{ formatPrice(d.profit_target || d.take_profit) }}</span>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                            <div v-else class="text-center py-8">
+                                <div class="inline-block p-3 rounded-full bg-slate-800 mb-2">
+                                    <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6 text-slate-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                                    </svg>
+                                </div>
+                                <p class="text-slate-500 text-sm font-medium">Wait / Hold</p>
+                                <p class="text-slate-600 text-xs mt-1">No new trade actions triggered</p>
+                            </div>
+                        </div>
+                    </div>
+
+
+                    <!-- History Log (Moved from slide-over) -->
+                    <div class="bg-slate-900 rounded-xl border border-slate-800 overflow-hidden flex flex-col max-h-[600px]">
+                        <div class="px-4 py-3 border-b border-slate-800 bg-gradient-to-r from-slate-900 to-slate-800 flex justify-between items-center">
+                            <h2 class="font-semibold text-slate-200">📜 Decision History</h2>
+                            <span class="text-xs text-slate-500">{{ history.length }} cycles</span>
+                        </div>
+                        <div class="flex-1 overflow-y-auto p-4 space-y-3 scrollbar-thin">
+                            <div v-if="history.length === 0" class="text-center text-slate-500 py-10">
+                                No history available
+                            </div>
+                            <div v-for="(item, idx) in reversedHistory" :key="idx" class="bg-slate-800/30 rounded-lg border border-slate-800 overflow-hidden">
+                                <div @click="item.expanded = !item.expanded" class="p-3 cursor-pointer hover:bg-slate-800/50 transition flex items-center justify-between group">
+                                    <div class="flex flex-col gap-1">
+                                        <div class="flex items-center gap-2">
+                                            <span class="font-mono text-xs text-slate-400">{{ formatTime(item.timestamp) }}</span>
+                                            <span v-if="item.decisions && item.decisions.length > 0" class="flex gap-1">
+                                                <span v-for="d in item.decisions" class="text-[10px] font-bold px-1.5 py-0.5 rounded bg-blue-500/10 text-blue-400 border border-blue-500/20">
+                                                    {{ d.symbol }} {{ d.action }}
+                                                </span>
+                                            </span>
+                                            <span v-else class="text-[10px] font-medium px-2 py-0.5 rounded bg-slate-800 text-slate-500 border border-slate-700">WAIT</span>
+                                        </div>
+                                    </div>
+                                    <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 text-slate-600 group-hover:text-slate-400 transition-transform duration-200" :class="item.expanded ? 'rotate-180' : ''" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
+                                    </svg>
+                                </div>
+                                
+                                <div v-if="item.expanded" class="border-t border-slate-800 bg-slate-950/30 p-3 space-y-3 animate-fade-in">
+                                    <div>
+                                        <div class="text-[10px] font-bold text-yellow-600/80 uppercase tracking-wider mb-1">Reasoning</div>
+                                        <div class="text-xs font-mono text-slate-400 whitespace-pre-wrap bg-slate-900/50 p-2 rounded border border-slate-800/50">{{ item.cot_trace }}</div>
+                                    </div>
+                                    <div>
+                                        <div class="text-[10px] font-bold text-blue-600/80 uppercase tracking-wider mb-1">User Prompt</div>
+                                        <div class="text-xs font-mono text-slate-500 whitespace-pre-wrap bg-slate-900/50 p-2 rounded border border-slate-800/50 max-h-32 overflow-y-auto">{{ item.user_prompt }}</div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <script>
+        const { createApp, ref, onMounted, computed } = Vue;
+
+        createApp({
+            setup() {
+                const state = ref({
+                    account: null,
+                    positions: [],
+                    runtime_minutes: 0,
+                    call_count: 0
+                });
+                const marketData = ref({});
+                const decision = ref(null);
+                const history = ref([]);
+                const currentTime = ref('');
+                
+                const tabs = [
+                    { id: 'reasoning', name: '🧠 Reasoning' },
+                    { id: 'user_prompt', name: '👤 User Prompt' },
+                    { id: 'system_prompt', name: '⚙️ System Prompt' },
+                ];
+                const activeTab = ref('reasoning');
+
+                const fetchData = async () => {
+                    try {
+                        const res = await fetch('/api/state');
+                        const data = await res.json();
+                        if (data) {
+                            state.value = data.context || {};
+                            marketData.value = data.market_data || {};
+                            decision.value = data.decision || null;
+                        }
+                        currentTime.value = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+                    } catch (e) {
+                        console.error("Fetch error", e);
+                    }
+                };
+
+                const fetchHistory = async () => {
+                    try {
+                        const res = await fetch('/api/history');
+                        const data = await res.json();
+                        if (Array.isArray(data)) {
+                            history.value = data.map(item => ({ ...item, expanded: false }));
+                        }
+                    } catch (e) {
+                        console.error("Fetch history error", e);
+                    }
+                };
+
+                const reversedHistory = computed(() => {
+                    return [...history.value].reverse();
+                });
+
+                onMounted(() => {
+                    fetchData();
+                    fetchHistory();
+                    setInterval(() => {
+                        fetchData();
+                        fetchHistory();
+                    }, 2000);
+                });
+
+                const formatMoney = (val) => {
+                    if (val === undefined || val === null) return '0.00';
+                    return val.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+                };
+
+                const formatPrice = (val) => {
+                    if (!val) return '0.00';
+                    return val < 1 ? val.toFixed(4) : val.toFixed(2);
+                };
+
+                const getPnLColor = (val) => {
+                    if (!val) return 'text-slate-300';
+                    return val > 0 ? 'text-emerald-400' : (val < 0 ? 'text-rose-400' : 'text-slate-300');
+                };
+
+                const formatDuration = (mins) => {
+                    if (!mins) return '0m';
+                    const h = Math.floor(mins / 60);
+                    const m = mins % 60;
+                    return h > 0 ? `${h}h ${m}m` : `${m}m`;
+                };
+
+                const getActionBorderColor = (action) => {
+                    if (action.includes('long')) return 'border-emerald-500';
+                    if (action.includes('short')) return 'border-rose-500';
+                    return 'border-slate-500';
+                };
+
+                const formatTime = (ts) => {
+                    if (!ts) return '';
+                    const d = new Date(ts);
+                    const pad = (n) => n.toString().padStart(2, '0');
+                    return (d.getMonth() + 1) + '/' + d.getDate() + ' ' + d.getHours() + ':' + pad(d.getMinutes());
+                };
+
+                return {
+                    state,
+                    marketData,
+                    decision,
+                    history,
+                    reversedHistory,
+                    currentTime,
+                    formatMoney,
+                    formatPrice,
+                    getPnLColor,
+                    formatDuration,
+                    getActionBorderColor,
+                    formatTime,
+                    tabs,
+                    activeTab
+                };
+            }
+        }).mount('#app');
+    </script>
+</body>
+</html>
