@@ -6,11 +6,26 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"math"
 	"net/http"
+	"net/url"
 	"os"
 	"regexp"
 	"strings"
 	"time"
+)
+
+// 预编译正则表达式
+var (
+	reJSONFence      = regexp.MustCompile(`(?is)` + "```json\\s*(\\[\\s*\\{.*?\\}\\s*\\])\\s*```")
+	reJSONArray      = regexp.MustCompile(`(?is)\[\s*\{.*?\}\s*\]`)
+	reArrayHead      = regexp.MustCompile(`^\[\s*\{`)
+	reArrayOpenSpace = regexp.MustCompile(`^\[\s+\{`)
+	reInvisibleRunes = regexp.MustCompile("[\u200B\u200C\u200D\uFEFF]")
+
+	// XML标签提取
+	reReasoningTag = regexp.MustCompile(`(?s)<reasoning>(.*?)</reasoning>`)
+	reDecisionTag  = regexp.MustCompile(`(?s)<decision>(.*?)</decision>`)
 )
 
 // AIBrain AI大脑
@@ -21,12 +36,29 @@ type AIBrain struct {
 	Client  *http.Client
 }
 
-func NewAIBrain(apiKey, apiURL, model string) *AIBrain {
+func NewAIBrain(apiKey, apiURL, model, proxyURL string) *AIBrain {
+	// 配置 Transport
+	transport := &http.Transport{
+		Proxy: http.ProxyFromEnvironment, // 默认使用环境变量
+	}
+
+	// 如果指定了 Proxy，则使用指定的
+	if proxyURL != "" {
+		if pURL, err := url.Parse(proxyURL); err == nil {
+			transport.Proxy = http.ProxyURL(pURL)
+		} else {
+			log.Printf("Warning: Invalid Proxy URL %s: %v", proxyURL, err)
+		}
+	}
+
 	return &AIBrain{
 		APIKey: apiKey,
 		APIURL: apiURL,
 		Model:  model,
-		Client: &http.Client{Timeout: 60 * time.Second},
+		Client: &http.Client{
+			Timeout:   120 * time.Second, // 增加超时时间到 120s
+			Transport: transport,
+		},
 	}
 }
 
@@ -59,58 +91,162 @@ func buildSystemPrompt(accountEquity float64, btcEthLeverage, altcoinLeverage in
 	var sb strings.Builder
 
 	// Read the prompt template file
-	templateContent, err := os.ReadFile("prompt_template.txt")
+	templateContent, err := os.ReadFile("extracted_prompts.md")
 	if err != nil {
-		log.Printf("Warning: Could not read prompt_template.txt: %v. Using default short prompt.", err)
+		log.Printf("Warning: Could not read extracted_prompts.md: %v. Using default short prompt.", err)
 		sb.WriteString("你是专业的加密货币交易AI。请根据市场数据做出交易决策。\\n\\n")
-		sb.WriteString("# 核心目标\\n最大化夏普比率。只在多重信号共振时开仓(信心度>=75)。\\n\\n")
 	} else {
 		sb.WriteString("你是专业的加密货币交易AI。请根据市场数据做出交易决策。\\n\\n")
 		sb.WriteString(string(templateContent))
 		sb.WriteString("\\n\\n")
 	}
 
-	sb.WriteString("# 硬约束（风险控制）\\n")
-	sb.WriteString("1. 风险回报比: 必须 ≥ 1:3\n")
+	// 硬约束（风险控制）
+	sb.WriteString("# 硬约束（风险控制）\n")
+	sb.WriteString("1. 风险回报比: 必须 ≥ 1:3（冒1%风险，赚3%+收益）\n")
 	sb.WriteString("2. 单笔风险上限: 账户净值的 1%-3%\n")
-	sb.WriteString(fmt.Sprintf("3. 杠杆限制: 山寨币最大%dx | BTC/ETH最大%dx\n", altcoinLeverage, btcEthLeverage))
-	sb.WriteString("4. 保证金使用率 ≤ 90%\n\n")
+	sb.WriteString(fmt.Sprintf("3. 杠杆限制: 山寨币最大%dx | BTC/ETH最大%dx\\n", altcoinLeverage, btcEthLeverage))
+	sb.WriteString("4. 保证金使用率 ≤ 90%\\n")
+	sb.WriteString("5. 开仓金额: 建议 ≥12 USDT（交易所最小名义价值10 USDT + 安全边际）\\n")
+	sb.WriteString("6. 利润保护: 只有当浮盈(ROE) > 15% 时，才考虑将止损上移至保本位；在此之前，允许利润回撤以换取趋势空间。仅当持仓 > 4小时且长期维持在 -3%~+3% 区间、且整体夏普明显为负时，才主动考虑平仓。\\n\\n")
 
-	sb.WriteString("# 输出格式 (严格遵守)\n")
-	sb.WriteString("**必须使用XML标签 <reasoning> 和 <decision> 标签分隔思维链和决策JSON**\n\n")
-	sb.WriteString("<reasoning>\n你的分析过程...\n</reasoning>\n\n")
-	sb.WriteString("<decision>\n```json\n[\n")
-	sb.WriteString(fmt.Sprintf("  {\"symbol\": \"BTCUSDT\", \"action\": \"open_long\", \"leverage\": 5, \"position_size_usd\": 1000, \"stop_loss\": 90000, \"profit_target\": 95000, \"confidence\": 85, \"risk_usd\": 50, \"invalidation_condition\": \"RSI drops below 30\", \"reasoning\": \"...\"}\n"))
-	sb.WriteString("]\n```\n</decision>\n")
+	// 交易频率与信号质量
+	sb.WriteString("# ⏱️ 交易频率认知\\n\\n")
+	sb.WriteString("- 优秀交易员：每天2-4笔 ≈ 每小时0.1-0.2笔\\n")
+	sb.WriteString("- 每小时>2笔 = 过度交易\\n")
+	sb.WriteString("- 单笔持仓时间≥30-60分钟\\n")
+	sb.WriteString("如果你发现自己每个周期都在交易 → 标准过低；若持仓<30分钟就平仓且非止损 → 过于急躁。\\\\n\\\\n")
+
+	sb.WriteString("# 🎯 开仓标准（30m 主力周期）\\\\n\\\\n")
+	sb.WriteString("你的核心决策必须基于 **30分钟 (30m)** 和 **4小时 (4h)** 周期。\\\\n")
+	sb.WriteString("- **30m (Intraday Wave)**: 主力操作周期，判断波段入场/出场。\\\\n")
+	sb.WriteString("- **4h (Trend Context)**: 确认大趋势方向，顺势而为。\\\\n")
+	sb.WriteString("- **3m (Micro-structure)**: 仅用于寻找精准挂单点位，**忽略其噪音**，不要被 3m 波动诱导频繁开平仓。\\\\n")
+	sb.WriteString("开仓要求：**30m 级别**出现明确的突破、回踩或反转信号，且 Volume/OI 配合。\\\\n\\\\n")
+
+	// 夏普比率驱动的自适应（稳健模式）
+	sb.WriteString("# 🧬 夏普比率自我进化（稳健模式）\\n\\n")
+	sb.WriteString("- Sharpe < -2.0：市场波动可能不利，提高标准，寻找信心度 > 75 的机会。\\n")
+	sb.WriteString("- -2.0 ~ 0：**保持正常交易频率**，初期负夏普属正常现象。寻找信心度 > 70 的机会即可开仓。\\n")
+	sb.WriteString("- > 0：状态良好，继续保持或适当增加仓位。\\n\\n")
+
+	// 决策流程提示
+	sb.WriteString("# 📋 决策流程\\n\\n")
+	sb.WriteString("1. 回顾夏普比率/盈亏 → 是否需要降频或暂停\\n")
+	sb.WriteString("2. 检查持仓 → 是否该止盈/止损/调整\\n")
+	sb.WriteString("3. 扫描候选币 + 多时间框 → 是否存在强信号\\n")
+	sb.WriteString("4. 先写思维链，再输出结构化JSON\\n\\n")
+
+	sb.WriteString("# 输出格式 (严格遵守)\\n")
+	sb.WriteString("**必须使用XML标签 <reasoning> 和 <decision> 标签分隔思维链和决策JSON**\\n\\n")
+	sb.WriteString("在 <decision> 中输出严格的 JSON 数组，每个元素代表一个交易决策。字段名必须与下面示例完全一致：symbol, action, leverage, position_size_usd, stop_loss, take_profit, confidence, risk_usd, invalidation_condition, reasoning。\\n\\n")
+	sb.WriteString("特别说明：\\n")
+	sb.WriteString("- 当 action = 'update_stop_loss' 时，请只填写 `symbol`, `action`, `new_stop_loss`, `confidence`, `reasoning`，不要再使用 `stop_loss` 字段。\\n")
+	sb.WriteString("- 当 action = 'update_take_profit' 时，请只填写 `symbol`, `action`, `new_take_profit`, `confidence`, `reasoning`。\\n")
+	sb.WriteString("- 当 action = 'hold' 或 'wait' 时，不要填写价格/仓位字段（如 stop_loss/position_size_usd），只需给出 `symbol`(如适用)、`action`、`confidence`, `reasoning`。\\n\\n")
+	sb.WriteString("<reasoning>\\n你的分析过程...\\n</reasoning>\\n\\n")
+	sb.WriteString("<decision>\\n```json\\n[\\n")
+	sb.WriteString("  {\"symbol\": \"BTCUSDT\", \"action\": \"open_long\", \"leverage\": 5, \"position_size_usd\": 1000, \"stop_loss\": 90000, \"take_profit\": 95000, \"confidence\": 85, \"risk_usd\": 50, \"invalidation_condition\": \"RSI drops below 30\", \"reasoning\": \"...\"}\\n")
+	sb.WriteString("]\\n```\\n</decision>\\n")
 
 	return sb.String()
 }
 
 func buildUserPrompt(ctx *Context) string {
 	var sb strings.Builder
-	sb.WriteString(fmt.Sprintf("时间: %s | 运行: %d分钟\n\n", ctx.CurrentTime, ctx.RuntimeMinutes))
+	sb.WriteString(fmt.Sprintf("时间: %s | 运行: %d分钟 | 周期: #%d\n\n", ctx.CurrentTime, ctx.RuntimeMinutes, ctx.CallCount))
 	
+	// BTC 市场风向标 (类似 nofx)
+	if btcData, hasBTC := ctx.MarketDataMap["BTCUSDT"]; hasBTC {
+		lsStr := ""
+		if btcData.LongShortRatio != nil {
+			lsStr = fmt.Sprintf(" | LS Ratio: %.2f", btcData.LongShortRatio.Ratio)
+		}
+		sb.WriteString(fmt.Sprintf("BTC: %.2f (1h: %+.2f%%, 4h: %+.2f%%) | MACD: %.4f | RSI: %.2f%s\n\n",
+			btcData.CurrentPrice, btcData.PriceChange1h, btcData.PriceChange4h,
+			btcData.CurrentMACD, btcData.CurrentRSI7, lsStr))
+	}
+
 	// 账户信息
-	sb.WriteString(fmt.Sprintf("账户: 净值%.2f | 可用%.2f | 盈亏%+.2f%%\n\n",
-		ctx.Account.TotalEquity, ctx.Account.AvailableBalance, ctx.Account.TotalPnLPct))
+	sb.WriteString(fmt.Sprintf("账户: 净值%.2f | 余额%.2f (%.1f%%) | 盈亏%+.2f%% | 保证金%.1f%% | 持仓%d个\n",
+		ctx.Account.TotalEquity,
+		ctx.Account.AvailableBalance,
+		(ctx.Account.AvailableBalance/ctx.Account.TotalEquity)*100,
+		ctx.Account.TotalPnLPct,
+		ctx.Account.MarginUsedPct,
+		ctx.Account.PositionCount))
+	
+	// 夏普比率
+	sb.WriteString(fmt.Sprintf("📊 运行时夏普比率: %.2f\n\n", ctx.SharpeRatio))
+
+	// 板块热度 (新增)
+	if len(ctx.Sectors) > 0 {
+		sb.WriteString("## Sector Heatmap (1h/4h Change)\n")
+		for _, sec := range ctx.Sectors {
+			sb.WriteString(fmt.Sprintf("- %s: 1h %+.2f%% | 4h %+.2f%% | Lead: %s\n",
+				sec.Name, sec.AvgChange1h, sec.AvgChange4h, sec.LeadingSymbol))
+		}
+		sb.WriteString("\n")
+	}
 
 	// 持仓信息
 	if len(ctx.Positions) > 0 {
 		sb.WriteString("## 当前持仓\n")
-		for _, pos := range ctx.Positions {
-			sb.WriteString(fmt.Sprintf("%s %s | 入场%.4f 当前%.4f | 盈亏%+.2f U (%+.2f%%) | 杠杆%dx\n",
-				pos.Symbol, strings.ToUpper(pos.Side), pos.EntryPrice, pos.MarkPrice,
-				pos.UnrealizedPnL, pos.UnrealizedPnLPct, pos.Leverage))
+		for i, pos := range ctx.Positions {
+			// 计算持仓时长
+			holdingDuration := ""
+			if pos.UpdateTime > 0 {
+				durationMs := time.Now().UnixMilli() - pos.UpdateTime
+				durationMin := durationMs / (1000 * 60)
+				if durationMin < 60 {
+					holdingDuration = fmt.Sprintf(" | 持仓%d分钟", durationMin)
+				} else {
+					holdingDuration = fmt.Sprintf(" | 持仓%d小时%d分钟", durationMin/60, durationMin%60)
+				}
+			}
+
+			// 计算仓位价值
+			positionValue := math.Abs(pos.Quantity) * pos.MarkPrice
+
+			sb.WriteString(fmt.Sprintf("%d. %s %s | 入场%.4f 当前%.4f | 数量%.4f | 价值%.0f U | 盈亏%+.2f U (%+.2f%%) | 最高%.2f%% | 杠杆%dx | 强平%.4f%s\n\n",
+				i+1, pos.Symbol, strings.ToUpper(pos.Side), 
+				pos.EntryPrice, pos.MarkPrice, pos.Quantity, positionValue,
+				pos.UnrealizedPnL, pos.UnrealizedPnLPct, pos.PeakPnLPct, 
+				pos.Leverage, pos.LiquidationPrice, holdingDuration))
+			
+			// 附带该持仓币种的最新市场数据
+			if marketData, ok := ctx.MarketDataMap[pos.Symbol]; ok {
+				sb.WriteString(formatMarketData(marketData))
+				sb.WriteString("\n")
+			}
 		}
-		sb.WriteString("\n")
 	} else {
 		sb.WriteString("当前持仓: 无\n\n")
 	}
 
-	// 市场数据
-	sb.WriteString("## 市场数据\n")
+	// 候选币种 (排除已持仓的)
+	sb.WriteString(fmt.Sprintf("## 候选币种 (%d个)\n\n", len(ctx.MarketDataMap)-len(ctx.Positions)))
+	displayedCount := 0
+	
+	// 先建立持仓索引
+	holdingMap := make(map[string]bool)
+	for _, p := range ctx.Positions {
+		holdingMap[p.Symbol] = true
+	}
+
 	for symbol, data := range ctx.MarketDataMap {
-		sb.WriteString(fmt.Sprintf("### %s\n", symbol))
+		if holdingMap[symbol] {
+			continue // 已在持仓部分展示过
+		}
+		displayedCount++
+		
+		// 模拟 nofx 的 Source 标签展示
+		sourceTag := ""
+		if data.Source != "" {
+			sourceTag = fmt.Sprintf(" (%s)", data.Source)
+		}
+
+		sb.WriteString(fmt.Sprintf("### %d. %s%s\n", displayedCount, symbol, sourceTag))
 		sb.WriteString(formatMarketData(data))
 		sb.WriteString("\n")
 	}
@@ -125,49 +261,87 @@ func formatMarketData(data *MarketData) string {
 
 	// 使用动态精度格式化价格
 	priceStr := formatPriceWithDynamicPrecision(data.CurrentPrice)
-	sb.WriteString(fmt.Sprintf("current_price = %s, current_ema20 = %.3f, current_macd = %.3f, current_rsi (7 period) = %.3f\n\n",
+	sb.WriteString(fmt.Sprintf("current_price = %s, current_ema20 = %.3f, current_macd = %.3f, current_rsi (7 period) = %.3f\n",
 		priceStr, data.CurrentEMA20, data.CurrentMACD, data.CurrentRSI7))
 
-	sb.WriteString(fmt.Sprintf("In addition, here is the latest %s open interest and funding rate for perps:\n\n",
+	sb.WriteString(fmt.Sprintf("Bollinger Bands (20, 2.0): Upper=%s, Mid=%s, Lower=%s\n\n",
+		formatPriceWithDynamicPrecision(data.BollingerUpper),
+		formatPriceWithDynamicPrecision(data.BollingerMiddle),
+		formatPriceWithDynamicPrecision(data.BollingerLower)))
+
+	sb.WriteString(fmt.Sprintf("In addition, here is the latest %s open interest, long/short ratio and funding rate for perps:\n\n",
 		data.Symbol))
+
+	if data.LongShortRatio != nil {
+		sb.WriteString(fmt.Sprintf("Top Trader LS Ratio: %.2f (Longs: %.1f%%, Shorts: %.1f%%)\\n",
+			data.LongShortRatio.Ratio, data.LongShortRatio.LongPct*100, data.LongShortRatio.ShortPct*100))
+	}
+
+	if data.Liquidation != nil {
+		sb.WriteString(fmt.Sprintf("Estimated Liquidation (1h): $%.0f (Side Ratio: %.1f >1 means Longs Rekt)\\n",
+			data.Liquidation.Amount1h, data.Liquidation.SideRatio))
+	}
 
 	if data.OpenInterest != nil {
 		oiLatestStr := formatPriceWithDynamicPrecision(data.OpenInterest.Latest)
 		oiAverageStr := formatPriceWithDynamicPrecision(data.OpenInterest.Average)
-		sb.WriteString(fmt.Sprintf("Open Interest: Latest: %s Average: %s\n\n",
-			oiLatestStr, oiAverageStr))
+		sb.WriteString(fmt.Sprintf("Open Interest: Latest: %s Average: %s (1h Chg: %+.2f%%, 4h Chg: %+.2f%%)\\n\\n",
+			oiLatestStr, oiAverageStr, data.OpenInterest.Change1h, data.OpenInterest.Change4h))
 	}
 
-	sb.WriteString(fmt.Sprintf("Funding Rate: %.2e\n\n", data.FundingRate))
+	sb.WriteString(fmt.Sprintf("Funding Rate: %.2e\\n\\n", data.FundingRate))
+
+	// 成交量与情绪分析
+	if data.VolumeAnalysis != nil {
+		va := data.VolumeAnalysis
+		sb.WriteString("Volume & Flow: ")
+		if va.RelativeVolume3m > 0 {
+			sb.WriteString(fmt.Sprintf("3m Relative Volume = %.2fx avg", va.RelativeVolume3m))
+		}
+		if va.IsVolumeSpike {
+			sb.WriteString(" (VOLUME SPIKE)")
+		}
+		if va.TakerBuySellRatio != 0 {
+			sb.WriteString(fmt.Sprintf(", taker buy/sell ratio = %.2f (>1 = aggressive buying)", va.TakerBuySellRatio))
+		}
+		sb.WriteString("\\n\\n")
+	}
+
+	if data.Sentiment != nil {
+		st := data.Sentiment
+		if st.FearGreedLabel != "" {
+			sb.WriteString(fmt.Sprintf("Local Fear/Greed: %s (%d/100)\\n", st.FearGreedLabel, st.FearGreedIndex))
+		}
+		if st.LocalSentiment != "" {
+			sb.WriteString(fmt.Sprintf("Local Sentiment Tag: %s\\n", st.LocalSentiment))
+		}
+		if st.Volatility1h > 0 {
+			sb.WriteString(fmt.Sprintf("1h Realized Vol (approx): %.4f\\n", st.Volatility1h))
+		}
+		sb.WriteString("\\n")
+	}
 
 	if data.IntradaySeries != nil {
-		sb.WriteString("Intraday series (3‑minute intervals, oldest → latest):\n\n")
-
+		// 将 3m 序列折叠/弱化描述
+		sb.WriteString("Micro‑structure (3m) for timing only (ignore noise):\\n")
 		if len(data.IntradaySeries.MidPrices) > 0 {
-			sb.WriteString(fmt.Sprintf("Mid prices: %s\n\n", formatFloatSlice(data.IntradaySeries.MidPrices)))
+			sb.WriteString(fmt.Sprintf("Mid prices: %s\\n", formatFloatSlice(data.IntradaySeries.MidPrices)))
 		}
+		sb.WriteString("\\n")
+	}
 
-		if len(data.IntradaySeries.EMA20Values) > 0 {
-			sb.WriteString(fmt.Sprintf("EMA indicators (20‑period): %s\n\n", formatFloatSlice(data.IntradaySeries.EMA20Values)))
-		}
+	// 30m 主力指标（高亮展示）
+	if data.EMA20_30m != 0 || data.MACD_30m != 0 || data.RSI14_30m != 0 || data.ATR14_30m != 0 {
+		sb.WriteString("⭐️ **Intraday Wave Context (30‑minute timeframe)**:\\n\\n")
+		sb.WriteString(fmt.Sprintf("EMA20 (30m): %.3f | MACD (30m): %.3f | RSI14 (30m): %.3f | ATR14 (30m): %.3f\\n\\n",
+			data.EMA20_30m, data.MACD_30m, data.RSI14_30m, data.ATR14_30m))
+	}
 
-		if len(data.IntradaySeries.MACDValues) > 0 {
-			sb.WriteString(fmt.Sprintf("MACD indicators: %s\n\n", formatFloatSlice(data.IntradaySeries.MACDValues)))
-		}
-
-		if len(data.IntradaySeries.RSI7Values) > 0 {
-			sb.WriteString(fmt.Sprintf("RSI indicators (7‑Period): %s\n\n", formatFloatSlice(data.IntradaySeries.RSI7Values)))
-		}
-
-		if len(data.IntradaySeries.RSI14Values) > 0 {
-			sb.WriteString(fmt.Sprintf("RSI indicators (14‑Period): %s\n\n", formatFloatSlice(data.IntradaySeries.RSI14Values)))
-		}
-
-		if len(data.IntradaySeries.Volume) > 0 {
-			sb.WriteString(fmt.Sprintf("Volume: %s\n\n", formatFloatSlice(data.IntradaySeries.Volume)))
-		}
-
-		sb.WriteString(fmt.Sprintf("3m ATR (14‑period): %.3f\n\n", data.IntradaySeries.ATR14))
+	// 1h 中周期指标
+	if data.EMA20_1h != 0 || data.MACD_1h != 0 || data.RSI14_1h != 0 || data.ATR14_1h != 0 {
+		sb.WriteString("Mid‑term context (1‑hour timeframe):\\n\\n")
+		sb.WriteString(fmt.Sprintf("EMA20 (1h): %.3f | MACD (1h): %.3f | RSI14 (1h): %.3f | ATR14 (1h): %.3f\\n\\n",
+			data.EMA20_1h, data.MACD_1h, data.RSI14_1h, data.ATR14_1h))
 	}
 
 	if data.LongerTermContext != nil {
@@ -241,11 +415,16 @@ func (b *AIBrain) callAI(systemPrompt, userPrompt string) (string, error) {
 	}
 	defer resp.Body.Close()
 
-	body, _ := io.ReadAll(resp.Body)
-	if resp.StatusCode != 200 {
-		return "", fmt.Errorf("API Error: %s", string(body))
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", fmt.Errorf("failed to read response body: %w", err)
 	}
 
+	if resp.StatusCode != 200 {
+		return "", fmt.Errorf("API Error (Status %d): %s", resp.StatusCode, string(body))
+	}
+
+	// 首先按 OpenAI/DeepSeek 兼容结构解析
 	var result struct {
 		Choices []struct {
 			Message struct {
@@ -253,10 +432,15 @@ func (b *AIBrain) callAI(systemPrompt, userPrompt string) (string, error) {
 			} `json:"message"`
 		} `json:"choices"`
 	}
-	json.Unmarshal(body, &result)
+	if err := json.Unmarshal(body, &result); err != nil {
+		log.Printf("AI JSON 解析失败: %v, body=%s", err, string(body))
+		return "", fmt.Errorf("AI response parse error")
+	}
 	
 	if len(result.Choices) == 0 {
-		return "", fmt.Errorf("No response from AI")
+		// 打印原始响应，帮助诊断是配额/鉴权还是其他错误
+		log.Printf("AI 返回了空 choices，原始响应: %s", string(body))
+		return "", fmt.Errorf("No response from AI: empty choices")
 	}
 
 	return result.Choices[0].Message.Content, nil
@@ -266,46 +450,64 @@ func parseAIResponse(response string) (*FullDecision, error) {
 	// 1. 提取 Reasoning
 	reasoning := extractTagContent(response, "reasoning")
 	if reasoning == "" {
-		// Fallback: if no tags, try to extract before JSON
-		idx := strings.Index(response, "```json")
-		if idx > 0 {
+		// Fallback: if no tags, try to extract before JSON or decision tag
+		if decisionIdx := strings.Index(response, "<decision>"); decisionIdx > 0 {
+			reasoning = response[:decisionIdx]
+		} else if idx := strings.Index(response, "```json"); idx > 0 {
 			reasoning = response[:idx]
 		} else {
 			reasoning = response // worst case
 		}
 	}
+	reasoning = strings.TrimSpace(reasoning)
 
 	// 2. 提取 Decision JSON
-	decisionContent := extractTagContent(response, "decision")
-	if decisionContent == "" {
-		decisionContent = response // Fallback
-	}
-	
-	// 提取 JSON 代码块
-	reJSON := regexp.MustCompile("(?s)```json\\s*(.*?)\\s*```")
-	match := reJSON.FindStringSubmatch(decisionContent)
-	var jsonStr string
-	if len(match) > 1 {
-		jsonStr = match[1]
+	// 预清洗：去零宽/BOM
+	s := removeInvisibleRunes(response)
+	s = strings.TrimSpace(s)
+	// 修复全角字符
+	s = fixMissingQuotes(s)
+
+	var jsonPart string
+	if match := reDecisionTag.FindStringSubmatch(s); match != nil && len(match) > 1 {
+		jsonPart = strings.TrimSpace(match[1])
 	} else {
-		// 尝试直接查找 []
-		start := strings.Index(decisionContent, "[")
-		end := strings.LastIndex(decisionContent, "]")
-		if start != -1 && end != -1 && end > start {
-			jsonStr = decisionContent[start : end+1]
-		}
+		jsonPart = s
+	}
+
+	// 修复 jsonPart 中的全角字符 (二次确保)
+	jsonPart = fixMissingQuotes(jsonPart)
+
+	var jsonContent string
+	if m := reJSONFence.FindStringSubmatch(jsonPart); m != nil && len(m) > 1 {
+		jsonContent = strings.TrimSpace(m[1])
+	} else {
+		// Fallback: 查找 JSON 数组
+		jsonContent = strings.TrimSpace(reJSONArray.FindString(jsonPart))
 	}
 
 	var decisions []Decision
-	if jsonStr != "" {
-		// 简单的全角转半角修复
-		jsonStr = strings.ReplaceAll(jsonStr, "，", ",")
-		jsonStr = strings.ReplaceAll(jsonStr, "：", ":")
-		
-		if err := json.Unmarshal([]byte(jsonStr), &decisions); err != nil {
-			log.Printf("JSON解析失败，原始内容: %s", jsonStr)
-			// 不返回 error，而是返回空决策，保证程序不崩
+	if jsonContent != "" {
+		// 规整格式
+		jsonContent = compactArrayOpen(jsonContent)
+		jsonContent = fixMissingQuotes(jsonContent)
+
+		if err := validateJSONFormat(jsonContent); err != nil {
+			log.Printf("JSON格式验证失败: %v, Content: %s", err, jsonContent)
+			// Fallback to empty decisions instead of crashing
+		} else {
+			if err := json.Unmarshal([]byte(jsonContent), &decisions); err != nil {
+				log.Printf("JSON解析失败: %v, Content: %s", err, jsonContent)
+			}
 		}
+	}
+
+	// 安全回退：如果解析失败或为空，生成保底决策
+	if len(decisions) == 0 {
+		if reasoning == "" {
+			reasoning = "Failed to parse AI response."
+		}
+		// 我们返回空决策列表，由上层处理（Wait）
 	}
 
 	return &FullDecision{
@@ -321,6 +523,52 @@ func extractTagContent(text, tag string) string {
 		return strings.TrimSpace(match[1])
 	}
 	return ""
+}
+
+// removeInvisibleRunes 去除零宽字符和 BOM
+func removeInvisibleRunes(s string) string {
+	return reInvisibleRunes.ReplaceAllString(s, "")
+}
+
+// compactArrayOpen 规整开头的 "[ {" -> "[{"
+func compactArrayOpen(s string) string {
+	return reArrayOpenSpace.ReplaceAllString(strings.TrimSpace(s), "[{")
+}
+
+// fixMissingQuotes 替换中文引号和全角字符
+func fixMissingQuotes(jsonStr string) string {
+	// 替换中文引号
+	jsonStr = strings.ReplaceAll(jsonStr, "\u201c", "\"") // "
+	jsonStr = strings.ReplaceAll(jsonStr, "\u201d", "\"") // "
+	jsonStr = strings.ReplaceAll(jsonStr, "\u2018", "'")  // '
+	jsonStr = strings.ReplaceAll(jsonStr, "\u2019", "'")  // '
+
+	// 替换全角符号
+	jsonStr = strings.ReplaceAll(jsonStr, "［", "[")
+	jsonStr = strings.ReplaceAll(jsonStr, "］", "]")
+	jsonStr = strings.ReplaceAll(jsonStr, "｛", "{")
+	jsonStr = strings.ReplaceAll(jsonStr, "｝", "}")
+	jsonStr = strings.ReplaceAll(jsonStr, "：", ":")
+	jsonStr = strings.ReplaceAll(jsonStr, "，", ",")
+	jsonStr = strings.ReplaceAll(jsonStr, "【", "[")
+	jsonStr = strings.ReplaceAll(jsonStr, "】", "]")
+	jsonStr = strings.ReplaceAll(jsonStr, "、", ",")
+	jsonStr = strings.ReplaceAll(jsonStr, "　", " ")
+
+	return jsonStr
+}
+
+// validateJSONFormat 验证 JSON 格式
+func validateJSONFormat(jsonStr string) error {
+	trimmed := strings.TrimSpace(jsonStr)
+	if !reArrayHead.MatchString(trimmed) {
+		if strings.HasPrefix(trimmed, "[") && !strings.Contains(trimmed[:min(20, len(trimmed))], "{") {
+			return fmt.Errorf("invalid decision array (must contain objects)")
+		}
+		return fmt.Errorf("JSON must start with [{")
+	}
+	// 不再强行禁止使用 "~"，避免误杀正常字符串；具体内容交由 JSON 解析和业务校验处理
+	return nil
 }
 
 // Helper

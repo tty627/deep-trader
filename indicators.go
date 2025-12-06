@@ -12,6 +12,9 @@ type Kline struct {
 	Close     float64
 	Volume    float64
 	CloseTime int64
+	// TakerBuyVolume is only used in backtest_exchange for CSV parsing
+	// Not used in live/simulated exchanges
+	TakerBuyVolume float64 // optional, only for backtest
 }
 
 // calculateEMA 计算EMA
@@ -178,7 +181,39 @@ func calculateIntradaySeries(klines []Kline) *IntradayData {
 	return data
 }
 
-// calculateLongerTermData 计算长期数据
+// calculateBollingerBands 计算布林带 (基于SMA)
+// 返回: upper, middle, lower
+func calculateBollingerBands(klines []Kline, period int, stdDevMultiplier float64) (float64, float64, float64) {
+	if len(klines) < period {
+		return 0, 0, 0
+	}
+
+	// 1. 计算 SMA (Middle Band)
+	// 取最近 period 个点
+	subset := klines[len(klines)-period:]
+	sum := 0.0
+	for _, k := range subset {
+		sum += k.Close
+	}
+	sma := sum / float64(period)
+
+	// 2. 计算标准差
+	varianceSum := 0.0
+	for _, k := range subset {
+		diff := k.Close - sma
+		varianceSum += diff * diff
+	}
+	variance := varianceSum / float64(period)
+	stdDev := math.Sqrt(variance)
+
+	// 3. 计算 Upper 和 Lower
+	upper := sma + (stdDev * stdDevMultiplier)
+	lower := sma - (stdDev * stdDevMultiplier)
+
+	return upper, sma, lower
+}
+
+// calculateLongerTermData 计算长期数据（假定传入的是目标时间框架的K线，例如4h）
 func calculateLongerTermData(klines []Kline) *LongerTermData {
 	data := &LongerTermData{
 		MACDValues:  make([]float64, 0, 10),
@@ -222,4 +257,160 @@ func calculateLongerTermData(klines []Kline) *LongerTermData {
 	}
 
 	return data
+}
+
+// aggregateKlines 将低周期K线按固定数量聚合为高周期K线，例如 20 根3m 聚合为 1 根1h。
+func aggregateKlines(klines []Kline, groupSize int) []Kline {
+	if groupSize <= 1 || len(klines) == 0 {
+		return klines
+	}
+
+	totalGroups := len(klines) / groupSize
+	if totalGroups == 0 {
+		return nil
+	}
+
+	res := make([]Kline, 0, totalGroups)
+	for g := 0; g < totalGroups; g++ {
+		start := g * groupSize
+		end := start + groupSize
+		if end > len(klines) {
+			end = len(klines)
+		}
+		group := klines[start:end]
+		if len(group) == 0 {
+			continue
+		}
+
+		open := group[0].Open
+		close := group[len(group)-1].Close
+		high := group[0].High
+		low := group[0].Low
+		volume := 0.0
+		for _, k := range group {
+			if k.High > high {
+				high = k.High
+			}
+			if k.Low < low {
+				low = k.Low
+			}
+			volume += k.Volume
+		}
+		closeTime := group[len(group)-1].CloseTime
+
+		res = append(res, Kline{
+			Open:      open,
+			High:      high,
+			Low:       low,
+			Close:     close,
+			Volume:    volume,
+			CloseTime: closeTime,
+		})
+	}
+
+	return res
+}
+
+// calculateVolumeAnalysis 基于一段K线计算相对成交量和主动买卖比
+func calculateVolumeAnalysis(klines []Kline, lookback int) *VolumeAnalysis {
+	if len(klines) == 0 {
+		return nil
+	}
+
+	last := klines[len(klines)-1]
+	currentVol := last.Volume
+	if currentVol <= 0 {
+		return &VolumeAnalysis{}
+	}
+
+	// 计算过去 lookback 根K线的平均成交量（包含当前这根）
+	start := len(klines) - lookback
+	if start < 0 {
+		start = 0
+	}
+	sumVol := 0.0
+	count := 0
+	for i := start; i < len(klines); i++ {
+		if klines[i].Volume <= 0 {
+			continue
+		}
+		sumVol += klines[i].Volume
+		count++
+	}
+
+	relative := 0.0
+	if count > 0 && sumVol > 0 {
+		avgVol := sumVol / float64(count)
+		if avgVol > 0 {
+			relative = currentVol / avgVol
+		}
+	}
+
+	// Taker 买卖比，基于 TakerBuyVolume / (TotalVolume - TakerBuyVolume)
+	buyVol := last.TakerBuyVolume
+	var ratio float64
+	if buyVol <= 0 {
+		ratio = 0
+	} else if buyVol >= currentVol {
+		// 全部视为买盘
+		ratio = 999
+	} else {
+		sellVol := currentVol - buyVol
+		if sellVol <= 0 {
+			ratio = 999
+		} else {
+			ratio = buyVol / sellVol
+		}
+	}
+
+	va := &VolumeAnalysis{
+		RelativeVolume3m:  relative,
+		TakerBuySellRatio: ratio,
+		IsVolumeSpike:     relative >= 2.5,
+	}
+	return va
+}
+
+// calculateRealizedVol 计算最近 lookback 根K线的简单已实现波动率（基于收盘价收益标准差）
+func calculateRealizedVol(klines []Kline, lookback int) float64 {
+	if len(klines) < lookback+1 {
+		return 0
+	}
+
+	start := len(klines) - lookback - 1
+	if start < 0 {
+		start = 0
+	}
+
+	var returns []float64
+	for i := start; i < len(klines)-1; i++ {
+		p0 := klines[i].Close
+		p1 := klines[i+1].Close
+		if p0 <= 0 || p1 <= 0 {
+			continue
+		}
+		ret := (p1 - p0) / p0
+		returns = append(returns, ret)
+	}
+
+	if len(returns) == 0 {
+		return 0
+	}
+
+	// 计算均值
+	sum := 0.0
+	for _, r := range returns {
+		sum += r
+	}
+	mean := sum / float64(len(returns))
+
+	// 计算标准差
+	var varSum float64
+	for _, r := range returns {
+		diff := r - mean
+		varSum += diff * diff
+	}
+	std := math.Sqrt(varSum / float64(len(returns)))
+
+	return std
 }

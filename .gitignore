@@ -1,2 +1,50 @@
 # 本地敏感配置
 config.local.json
+*.local.json
+.env
+.env.local
+*.key
+*.pem
+*secret*
+*credential*
+
+# 临时文件
+.run.sh.swp
+*.swp
+*~
+
+# 编译产物
+simple_ai_trader
+simple_ai_trader_bin
+deep_trader
+deep_trader.exe
+*.exe
+*.o
+*.so
+*.dylib
+
+# 日志文件
+trader.log
+*.log
+
+# 运行时数据
+position_open_time.json
+
+# 备份文件
+*.backup
+*.bak
+*.old
+
+# IDE 和编辑器
+.vscode/
+.idea/
+*.iml
+.DS_Store
+Thumbs.db
+
+# 数据目录（根据需要取消注释）
+# backtest_data/
+# data/
+
+# 其他临时文件
+=

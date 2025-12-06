@@ -16,4 +16,7 @@ type Exchange interface {
 	
 	// ExecuteDecision 执行交易决策
 	ExecuteDecision(d Decision) error
+
+	// GetTradeHistory 获取历史交易记录
+	GetTradeHistory() []TradeRecord
 }

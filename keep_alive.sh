@@ -1,8 +1,7 @@
 #!/bin/bash
 
-# 确保设置了代理 (参考你的 ClashX 设置)
-export HTTP_PROXY=http://127.0.0.1:54935
-export HTTPS_PROXY=http://127.0.0.1:54935
+# 如需给 Binance 设置代理，请在 config.local.json 里配置 binance_proxy_url
+# 不再使用全局 HTTP(S)_PROXY，避免影响 AI 接口
 
 # 编译程序 (比 go run 更稳定)
 echo "正在编译..."

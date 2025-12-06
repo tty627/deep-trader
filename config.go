@@ -4,6 +4,7 @@ import (
     "encoding/json"
     "fmt"
     "os"
+    "strconv"
 )
 
 // Config 用于本地配置 API Key 等敏感信息
@@ -15,6 +16,15 @@ type Config struct {
     AIAPIKey string `json:"ai_api_key"`
     AIAPIURL string `json:"ai_api_url"`
     AIModel  string `json:"ai_model"`
+
+    // AI 循环周期（秒），用于控制主循环的休眠时间
+    // 建议范围：30 - 900 秒。默认 150 秒（2.5 分钟）
+    LoopIntervalSeconds int `json:"loop_interval_seconds"`
+
+    // 交易配置
+    TradingSymbols  []string `json:"trading_symbols"`   // 交易币种列表
+    BTCETHLeverage  int      `json:"btc_eth_leverage"`  // BTC/ETH 最大杠杆
+    AltcoinLeverage int      `json:"altcoin_leverage"`  // 山寨币最大杠杆
 
     // 币安实盘相关（可选，不填则使用模拟盘）
     BinanceAPIKey    string `json:"binance_api_key"`
@@ -52,6 +62,30 @@ func LoadConfig() (*Config, error) {
     }
     if cfg.BinanceProxyURL == "" {
         cfg.BinanceProxyURL = os.Getenv("BINANCE_PROXY_URL")
+    }
+
+    // 循环周期：支持环境变量 AI_LOOP_INTERVAL_SECONDS 覆盖
+    if cfg.LoopIntervalSeconds == 0 {
+        if v := os.Getenv("AI_LOOP_INTERVAL_SECONDS"); v != "" {
+            if sec, err := strconv.Atoi(v); err == nil && sec > 0 {
+                cfg.LoopIntervalSeconds = sec
+            }
+        }
+    }
+    // 默认值 150 秒（2.5 分钟）
+    if cfg.LoopIntervalSeconds <= 0 {
+        cfg.LoopIntervalSeconds = 150
+    }
+
+    // 交易配置默认值
+    if len(cfg.TradingSymbols) == 0 {
+        cfg.TradingSymbols = []string{"BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT", "DOGEUSDT"}
+    }
+    if cfg.BTCETHLeverage <= 0 {
+        cfg.BTCETHLeverage = 10
+    }
+    if cfg.AltcoinLeverage <= 0 {
+        cfg.AltcoinLeverage = 5
     }
 
     // 至少要有 AIAPIKey
