@@ -31,35 +31,80 @@
         body {
             background-color: #020617;
             background-image:
-                radial-gradient(circle at 0% 0%, rgba(56, 189, 248, 0.18), transparent 55%),
-                radial-gradient(circle at 100% 100%, rgba(37, 99, 235, 0.35), transparent 65%);
-            color: #e2e8f0;
+                radial-gradient(circle at 0% 0%, rgba(168, 85, 247, 0.30), transparent 55%),
+                radial-gradient(circle at 100% 100%, rgba(236, 72, 153, 0.24), transparent 55%);
+            color: #e5e7eb;
         }
         .scrollbar-hide::-webkit-scrollbar { display: none; }
         .scrollbar-hide { -ms-overflow-style: none; scrollbar-width: none; }
         /* Custom Scrollbar */
         ::-webkit-scrollbar { width: 6px; height: 6px; }
-        ::-webkit-scrollbar-track { background: #0f172a; }
-        ::-webkit-scrollbar-thumb { background: #334155; border-radius: 3px; }
-        ::-webkit-scrollbar-thumb:hover { background: #475569; }
+        ::-webkit-scrollbar-track { background: #020617; }
+        ::-webkit-scrollbar-thumb { background: #1f2937; border-radius: 3px; }
+        ::-webkit-scrollbar-thumb:hover { background: #4b5563; }
         
-        .fade-enter-active, .fade-leave-active { transition: opacity 0.3s ease; }
+        .fade-enter-active, .fade-leave-active { transition: opacity 0.18s ease; }
         .fade-enter-from, .fade-leave-to { opacity: 0; }
+
+        /* Card shell */
+        .dashboard-card {
+            position: relative;
+            overflow: hidden;
+            background:
+                radial-gradient(circle at 0% 0%, rgba(168, 85, 247, 0.24), transparent 55%),
+                radial-gradient(circle at 100% 100%, rgba(236, 72, 153, 0.18), transparent 55%),
+                rgba(15, 23, 42, 0.98);
+            border-radius: 0.75rem;
+            border: 1px solid rgba(216, 180, 254, 0.65);
+            transition:
+                transform 0.18s ease,
+                box-shadow 0.18s ease,
+                border-color 0.18s ease,
+                background-position 0.25s ease;
+            background-size: 160% 160%;
+            background-position: 0% 0%;
+        }
+        .dashboard-card:hover {
+            transform: translateY(-1px);
+            border-color: #e879f9;
+            box-shadow: 0 16px 40px rgba(15, 23, 42, 0.95);
+            background-position: 10% 20%;
+        }
+
+        /* Market ticker */
+        .ticker-card {
+            transition:
+                transform 0.16s ease,
+                box-shadow 0.16s ease,
+                border-color 0.16s ease,
+                background-color 0.16s ease;
+        }
+        .ticker-card:hover {
+            transform: translateY(-1px);
+            border-color: #e879f9;
+            box-shadow: 0 10px 26px rgba(15, 23, 42, 0.9);
+            background-image: linear-gradient(135deg, rgba(168, 85, 247, 0.20), rgba(236, 72, 153, 0.18));
+        }
+
+        /* Modal backdrop */
+        .modal-backdrop {
+            backdrop-filter: blur(18px);
+        }
     </style>
 </head>
 <body class="antialiased min-h-screen flex flex-col">
     <div id="app" class="flex-1 flex flex-col">
         
         <!-- Top Navigation -->
-        <nav class="border-b border-slate-800 bg-slate-900/80 backdrop-blur sticky top-0 z-30">
+        <nav class="border-b border-slate-800 bg-gradient-to-r from-slate-950 via-slate-900 to-slate-950 backdrop-blur sticky top-0 z-30">
             <div class="container mx-auto px-4 h-16 flex items-center justify-between">
                 <div class="flex items-center gap-3">
-                    <div class="bg-blue-600 text-white p-1.5 rounded-lg shadow-lg shadow-blue-500/20">
-                        <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z" />
+                    <div class="border border-slate-700 bg-slate-900/80 text-slate-100 p-1.5 rounded-lg shadow-sm">
+                        <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M13 10V3L4 14h7v7l9-11h-7z" />
                         </svg>
                     </div>
-                    <h1 class="text-xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-white to-slate-400">
+                    <h1 class="text-lg lg:text-xl font-semibold text-slate-100 tracking-tight">
                         Simple AI Trader
                     </h1>
                 </div>
@@ -81,14 +126,14 @@
             </div>
         </nav>
 
-        <main class="container mx-auto px-4 py-6 space-y-6 flex-1">
+        <main class="container mx-auto px-4 py-8 lg:py-10 space-y-8 flex-1">
             
             <!-- KPI Grid -->
             <div v-if="state.account" class="grid grid-cols-2 md:grid-cols-5 gap-4">
                 <!-- Total Equity -->
-                <div class="bg-slate-900 rounded-xl p-4 border border-slate-800 relative overflow-hidden group">
+                <div class="bg-slate-900 rounded-xl p-4 border border-slate-800 relative overflow-hidden group dashboard-card">
                     <div class="absolute top-0 right-0 p-3 opacity-10 group-hover:opacity-20 transition">
-                        <svg xmlns="http://www.w3.org/2000/svg" class="h-12 w-12 text-blue-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <svg xmlns="http://www.w3.org/2000/svg" class="h-12 w-12 text-fuchsia-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
                         </svg>
                     </div>
@@ -97,7 +142,7 @@
                 </div>
                 
                 <!-- Total PnL (New) -->
-                <div class="bg-slate-900 rounded-xl p-4 border border-slate-800">
+                <div class="bg-slate-900 rounded-xl p-4 border border-slate-800 dashboard-card">
                     <div class="text-slate-400 text-xs font-medium uppercase tracking-wider mb-1">累计盈亏 (Total PnL)</div>
                     <div class="text-2xl font-bold font-mono" :class="getPnLColor(state.account.total_pnl)">
                         {{ state.account.total_pnl >= 0 ? '+' : '' }}{{ formatMoney(state.account.total_pnl) }}
@@ -108,7 +153,7 @@
                 </div>
 
                 <!-- Available Balance -->
-                <div class="bg-slate-900 rounded-xl p-4 border border-slate-800">
+                <div class="bg-slate-900 rounded-xl p-4 border border-slate-800 dashboard-card">
                     <div class="text-slate-400 text-xs font-medium uppercase tracking-wider mb-1">累计盈亏 (Total PnL)</div>
                     <div class="text-2xl font-bold font-mono" :class="getPnLColor(state.account.total_pnl)">
                         {{ state.account.total_pnl >= 0 ? '+' : '' }}{{ formatMoney(state.account.total_pnl) }}
@@ -119,13 +164,13 @@
                 </div>
 
                 <!-- Available Balance -->
-                <div class="bg-slate-900 rounded-xl p-4 border border-slate-800">
+                <div class="bg-slate-900 rounded-xl p-4 border border-slate-800 dashboard-card">
                     <div class="text-slate-400 text-xs font-medium uppercase tracking-wider mb-1">可用余额 (Available)</div>
                     <div class="text-2xl font-bold font-mono text-slate-200">${{ formatMoney(state.account.available_balance) }}</div>
                 </div>
 
                 <!-- Unrealized PnL -->
-                <div class="bg-slate-900 rounded-xl p-4 border border-slate-800">
+                <div class="bg-slate-900 rounded-xl p-4 border border-slate-800 dashboard-card">
                     <div class="text-slate-400 text-xs font-medium uppercase tracking-wider mb-1">浮动盈亏 (Unrealized PnL)</div>
                     <div class="text-2xl font-bold font-mono" :class="getPnLColor(state.account.unrealized_pnl)">
                         {{ state.account.unrealized_pnl >= 0 ? '+' : '' }}{{ formatMoney(state.account.unrealized_pnl) }}
@@ -133,7 +178,7 @@
                 </div>
 
                 <!-- Sharpe Ratio -->
-                <div class="bg-slate-900 rounded-xl p-4 border border-slate-800 relative overflow-hidden">
+                <div class="bg-slate-900 rounded-xl p-4 border border-slate-800 relative overflow-hidden dashboard-card">
                     <div class="text-slate-400 text-xs font-medium uppercase tracking-wider mb-1">夏普比率 (Sharpe)</div>
                     <div class="text-2xl font-bold font-mono" :class="getSharpeColor(state.sharpe_ratio)">
                         {{ state.sharpe_ratio ? state.sharpe_ratio.toFixed(2) : '0.00' }}
@@ -144,17 +189,17 @@
 
             <!-- Market Ticker -->
             <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-3">
-                <div v-for="(data, symbol) in marketData" :key="symbol" class="bg-slate-900 hover:bg-slate-800 border border-slate-800 hover:border-slate-700 p-3 rounded-lg transition group relative">
+                <div v-for="(data, symbol) in marketData" :key="symbol" class="bg-slate-900 hover:bg-slate-800 border border-slate-800 hover:border-slate-700 p-3 rounded-lg transition group relative ticker-card">
                     <div class="flex justify-between items-start mb-1">
                         <div class="flex flex-col">
                             <span class="font-bold text-sm text-slate-200">{{ symbol }}</span>
-                            <span v-if="data.Source" class="text-[10px] text-blue-400 bg-blue-500/10 px-1 rounded w-fit mt-0.5">{{ data.Source }}</span>
+                            <span v-if="data.Source" class="text-[10px] text-fuchsia-300 bg-fuchsia-500/10 px-1 rounded w-fit mt-0.5">{{ data.Source }}</span>
                         </div>
                         <span class="text-xs font-mono px-1.5 py-0.5 rounded" :class="data.PriceChange1h >= 0 ? 'bg-emerald-500/10 text-emerald-400' : 'bg-rose-500/10 text-rose-400'">
                             {{ data.PriceChange1h.toFixed(2) }}%
                         </span>
                     </div>
-                    <div class="font-mono text-lg font-semibold text-white group-hover:text-blue-400 transition-colors">
+                    <div class="font-mono text-lg font-semibold text-white group-hover:text-fuchsia-300 transition-colors">
                         ${{ formatPrice(data.CurrentPrice) }}
                     </div>
                 </div>
@@ -166,10 +211,10 @@
                 <div class="lg:col-span-2 space-y-6">
                     
                     <!-- Positions -->
-                    <div class="bg-slate-900 rounded-xl border border-slate-800 overflow-hidden">
+                    <div class="bg-slate-900 rounded-xl border border-slate-800 overflow-hidden dashboard-card">
                         <div class="px-4 py-3 border-b border-slate-800 flex justify-between items-center bg-slate-900/50">
                             <h2 class="font-semibold text-slate-200 flex items-center gap-2">
-                                📥 当前持仓
+                                当前持仓
                                 <span v-if="state.positions" class="bg-slate-800 text-xs px-2 py-0.5 rounded-full text-slate-400">{{ state.positions.length }}</span>
                             </h2>
                             <div class="flex items-center gap-3">
@@ -181,7 +226,7 @@
                                     :class="closeAllLoading || !state.positions || state.positions.length === 0
                                         ? 'border-slate-700 text-slate-600 bg-slate-800 cursor-not-allowed'
                                         : 'border-rose-500/60 text-rose-300 bg-rose-500/10 hover:bg-rose-500/20'">
-                                    <span v-if="!closeAllLoading">⚠️ 一键平仓</span>
+                                    <span v-if="!closeAllLoading">一键平仓</span>
                                     <span v-else class="flex items-center gap-1">
                                         <svg class="animate-spin h-3 w-3" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
                                             <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
@@ -191,6 +236,9 @@
                                     </span>
                                 </button>
                             </div>
+                        </div>
+                        <div v-if="closeAllMessage" class="px-4 pt-2 pb-1 text-[11px]" :class="closeAllError ? 'text-rose-400' : 'text-emerald-400'">
+                            {{ closeAllMessage }}
                         </div>
                         
                         <div class="overflow-x-auto">
@@ -225,7 +273,7 @@
                                             </div>
                                             <div class="text-xs opacity-70 flex items-center justify-end gap-1">
                                                 <span :class="getPnLColor(pos.unrealized_pnl_pct)">{{ pos.unrealized_pnl_pct.toFixed(2) }}%</span>
-                                                <span v-if="pos.peak_pnl_pct" class="text-slate-500" title="Peak ROE">/ 🏆{{ pos.peak_pnl_pct.toFixed(2) }}%</span>
+                                                <span v-if="pos.peak_pnl_pct" class="text-slate-500" title="Peak ROE">/ Peak {{ pos.peak_pnl_pct.toFixed(2) }}%</span>
                                             </div>
                                         </td>
                                     </tr>
@@ -240,9 +288,9 @@
                         </div>
                     </div>
 
-                    <div class="bg-slate-900 rounded-xl border border-slate-800 overflow-hidden">
-                        <div class="px-4 py-3 border-b border-slate-800 bg-slate-900/50 flex justify-between items-center">
-                            <h2 class="font-semibold text-slate-200">📜 历史仓位 (Trade History)</h2>
+                    <div class="bg-slate-900 rounded-xl border border-slate-800 overflow-hidden dashboard-card">
+                        <div class="px-4 py-3 border-b border-slate-800 bg-slate-900/60 flex justify-between items-center">
+                            <h2 class="font-semibold text-slate-200">历史仓位 (Trade History)</h2>
                             <span class="text-xs text-slate-500" v-if="tradeHistory.length > 0">{{ tradeHistory.length }} closed</span>
                         </div>
                         <div class="overflow-x-auto max-h-[300px] overflow-y-auto scrollbar-thin">
@@ -284,14 +332,14 @@
                     </div>
 
                     <!-- AI Context Tabs -->
-                    <div class="bg-slate-900 rounded-xl border border-slate-800 overflow-hidden flex flex-col h-[500px]">
+                    <div class="bg-slate-900 rounded-xl border border-slate-800 overflow-hidden flex flex-col h-[500px] dashboard-card">
                         <div class="flex border-b border-slate-800">
                             <button 
                                 v-for="tab in tabs" 
                                 :key="tab.id"
                                 @click="activeTab = tab.id"
                                 class="px-4 py-3 text-sm font-medium transition-colors border-b-2 focus:outline-none"
-                                :class="activeTab === tab.id ? 'border-blue-500 text-blue-400 bg-slate-800/50' : 'border-transparent text-slate-400 hover:text-slate-200 hover:bg-slate-800/30'"
+:class="activeTab === tab.id ? 'border-fuchsia-500 text-fuchsia-300 bg-slate-800/50' : 'border-transparent text-slate-400 hover:text-slate-200 hover:bg-slate-800/30'"
                             >
                                 {{ tab.name }}
                             </button>
@@ -303,7 +351,7 @@
                                     {{ decision.cot_trace }}
                                 </div>
                                 <div v-else-if="activeTab === 'user_prompt'">
-                                    <div class="text-blue-500/80 mb-2 font-bold uppercase tracking-wider text-[10px]">User Prompt</div>
+                                    <div class="text-fuchsia-400/80 mb-2 font-bold uppercase tracking-wider text-[10px]">User Prompt</div>
                                     {{ decision.user_prompt }}
                                 </div>
                                 <div v-else-if="activeTab === 'system_prompt'">
@@ -322,93 +370,10 @@
                 <!-- Right Column -->
                 <div class="space-y-6">
                     
-                    <!-- Manual Leverage Control -->
-                    <div class="bg-slate-900 rounded-xl border border-slate-800 overflow-hidden">
-                        <div class="px-4 py-3 border-b border-slate-800 bg-gradient-to-r from-slate-900 to-slate-800 flex items-center justify-between">
-                            <h2 class="font-semibold text-slate-200 flex items-center gap-2">
-                                🎚 杠杆控制 / Leverage Control
-                            </h2>
-                            <span class="text-xs text-slate-500">Binance Futures</span>
-                        </div>
-                        <div class="p-4 space-y-3">
-                            <div class="grid grid-cols-1 gap-3 sm:grid-cols-[2fr,1fr,auto] items-end">
-                                <div>
-                                    <label class="block text-xs text-slate-400 mb-1">交易对 Symbol</label>
-                                    <input v-model="levSymbol" placeholder="如 BTCUSDT" class="w-full px-3 py-2 rounded-md bg-slate-950/60 border border-slate-700 text-sm text-slate-100 focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500 font-mono" />
-                                </div>
-                                <div>
-                                    <label class="block text-xs text-slate-400 mb-1">杠杆 Leverage (x)</label>
-                                    <input v-model.number="levValue" type="number" min="1" max="125" class="w-full px-3 py-2 rounded-md bg-slate-950/60 border border-slate-700 text-sm text-slate-100 focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500 font-mono" />
-                                </div>
-                                <div class="flex gap-2">
-                                    <button @click="applyLeverage" :disabled="levLoading" class="inline-flex items-center justify-center px-4 py-2 rounded-md bg-blue-600 hover:bg-blue-500 disabled:bg-slate-700 text-sm font-medium text-white shadow-sm shadow-blue-500/20 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 ring-offset-slate-950">
-                                        <span v-if="!levLoading">应用</span>
-                                        <span v-else class="flex items-center gap-1">
-                                            <svg class="animate-spin h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                                                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-                                                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"></path>
-                                            </svg>
-                                            <span>执行中...</span>
-                                        </span>
-                                    </button>
-                                </div>
-                            </div>
-                            <p class="text-[11px] text-slate-500">
-                                说明：通过 Binance API 直接调整该合约的<strong class="text-slate-300">合约杠杆倍数</strong>，不会开仓和平仓，仅修改杠杆设置。
-                            </p>
-                            <p v-if="levMessage" class="text-[11px]" :class="levError ? 'text-rose-400' : 'text-emerald-400'">
-                                {{ levMessage }}
-                            </p>
-                            <p v-if="closeAllMessage" class="text-[11px] mt-1" :class="closeAllError ? 'text-rose-400' : 'text-emerald-400'">
-                                {{ closeAllMessage }}
-                            </p>
-                        </div>
-                    </div>
-
-                    <!-- AI Loop Interval Control -->
-                    <div class="bg-slate-900 rounded-xl border border-slate-800 overflow-hidden">
-                        <div class="px-4 py-3 border-b border-slate-800 bg-gradient-to-r from-slate-900 to-slate-800 flex items-center justify-between">
-                            <h2 class="font-semibold text-slate-200 flex items-center gap-2">
-                                ⏱ AI 循环周期 / Loop Interval
-                            </h2>
-                            <span class="text-xs text-slate-500">全局配置</span>
-                        </div>
-                        <div class="p-4 space-y-3">
-                            <div class="grid grid-cols-1 gap-3 sm:grid-cols-[2fr,auto] items-end">
-                                <div>
-                                    <label class="block text-xs text-slate-400 mb-1">循环周期（秒）Loop Interval (seconds)</label>
-                                    <input v-model.number="loopIntervalLocal" type="number" min="30" max="900" step="30" class="w-full px-3 py-2 rounded-md bg-slate-950/60 border border-slate-700 text-sm text-slate-100 focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500 font-mono" />
-                                    <p class="mt-1 text-[11px] text-slate-500">
-                                        当前后端配置：<span class="text-slate-200 font-mono">{{ loopInterval }}s</span>
-                                        （约 {{ (loopInterval / 60).toFixed(1) }} 分钟）
-                                    </p>
-                                </div>
-                                <div class="flex gap-2">
-                                    <button @click="updateLoopInterval" :disabled="loopSaving" class="inline-flex items-center justify-center px-4 py-2 rounded-md bg-emerald-600 hover:bg-emerald-500 disabled:bg-slate-700 text-sm font-medium text-white shadow-sm shadow-emerald-500/20 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-emerald-500 ring-offset-slate-950 w-full">
-                                        <span v-if="!loopSaving">保存</span>
-                                        <span v-else class="flex items-center gap-1">
-                                            <svg class="animate-spin h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                                                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-                                                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"></path>
-                                            </svg>
-                                            <span>更新中...</span>
-                                        </span>
-                                    </button>
-                                </div>
-                            </div>
-                            <p class="text-[11px] text-slate-500">
-                                提示：修改后从<strong class="text-slate-300">下一周期</strong>开始生效。建议范围 30–900 秒，过短会导致请求过于频繁。
-                            </p>
-                            <p v-if="loopMessage" class="text-[11px]" :class="loopError ? 'text-rose-400' : 'text-emerald-400'">
-                                {{ loopMessage }}
-                            </p>
-                        </div>
-                    </div>
-
                     <!-- Latest Decision -->
-                    <div class="bg-slate-900 rounded-xl border border-slate-800 overflow-hidden">
-                        <div class="px-4 py-3 border-b border-slate-800 bg-gradient-to-r from-slate-900 to-slate-800">
-                            <h2 class="font-semibold text-slate-200">⚡ 最近操作 / Latest Actions</h2>
+                    <div class="bg-slate-900 rounded-xl border border-slate-800 overflow-hidden dashboard-card">
+                        <div class="px-4 py-3 border-b border-slate-800 bg-slate-900/70">
+                            <h2 class="font-semibold text-slate-200">最近操作 / Latest Actions</h2>
                         </div>
                         <div class="p-4 max-h-[400px] overflow-y-auto space-y-3">
                             <div v-if="decision && decision.decisions && decision.decisions.length > 0">
@@ -422,7 +387,7 @@
                                                 {{ d.exec_status === 'success' ? '成功' : '失败' }}
                                             </span>
                                         </div>
-                                        <div v-if="d.confidence" class="text-xs font-bold px-2 py-0.5 rounded" :class="d.confidence >= 80 ? 'bg-yellow-500/20 text-yellow-400' : 'bg-blue-500/20 text-blue-400'">
+                                        <div v-if="d.confidence" class="text-xs font-bold px-2 py-0.5 rounded" :class="d.confidence >= 80 ? 'bg-fuchsia-500/20 text-fuchsia-200' : 'bg-slate-700/80 text-slate-200'">
                                             {{ d.confidence }}% Conf.
                                         </div>
                                     </div>
@@ -474,9 +439,9 @@
 
 
                     <!-- History Log (Moved from slide-over) -->
-                    <div class="bg-slate-900 rounded-xl border border-slate-800 overflow-hidden flex flex-col max-h-[600px]">
-                        <div class="px-4 py-3 border-b border-slate-800 bg-gradient-to-r from-slate-900 to-slate-800 flex justify-between items-center">
-                            <h2 class="font-semibold text-slate-200">📜 决策历史 (Decision History)</h2>
+                    <div class="bg-slate-900 rounded-xl border border-slate-800 overflow-hidden flex flex-col max-h-[600px] dashboard-card">
+                        <div class="px-4 py-3 border-b border-slate-800 bg-slate-900/70 flex justify-between items-center">
+                            <h2 class="font-semibold text-slate-200">决策历史 (Decision History)</h2>
                             <span class="text-xs text-slate-500">{{ history.length }} cycles</span>
                         </div>
                         <div class="flex-1 overflow-y-auto p-4 space-y-3 scrollbar-thin">
@@ -484,12 +449,12 @@
                                 No history available
                             </div>
                             <div v-for="(item, idx) in reversedHistory" :key="item.timestamp || idx" class="bg-slate-800/30 rounded-lg border border-slate-800 overflow-hidden">
-                                <div @click="item.expanded = !item.expanded" class="p-3 cursor-pointer hover:bg-slate-800/50 transition flex items-center justify-between group">
+                                <div class="p-3 flex items-center justify-between gap-2">
                                     <div class="flex flex-col gap-1">
                                         <div class="flex items-center gap-2">
                                             <span class="font-mono text-xs text-slate-400">{{ formatTime(item.timestamp) }}</span>
                                             <span v-if="item.decisions && item.decisions.length > 0" class="flex flex-wrap gap-1">
-                                                <span v-for="d in item.decisions" class="inline-flex items-center gap-1 text-[10px] font-bold px-1.5 py-0.5 rounded border"
+                                                <span v-for="(d, di) in item.decisions" :key="di" class="inline-flex items-center gap-1 text-[10px] font-bold px-1.5 py-0.5 rounded border"
                                                       :class="getExecStatusColor(d.exec_status || (d.action && d.action !== 'wait' ? 'unknown' : ''))">
                                                     <span>{{ d.symbol }} {{ d.action }}</span>
                                                     <span v-if="d.exec_status === 'success'">✅</span>
@@ -499,30 +464,82 @@
                                             <span v-else class="text-[10px] font-medium px-2 py-0.5 rounded bg-slate-800 text-slate-500 border border-slate-700">WAIT</span>
                                         </div>
                                     </div>
-                                    <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 text-slate-600 group-hover:text-slate-400 transition-transform duration-200" :class="item.expanded ? 'rotate-180' : ''" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
-                                    </svg>
-                                </div>
-                                
-                                <div v-if="item.expanded" class="border-t border-slate-800 bg-slate-950/30 p-3 space-y-3 animate-fade-in">
-                                    <div>
-                                        <div class="text-[10px] font-bold text-yellow-600/80 uppercase tracking-wider mb-1">Reasoning</div>
-                                        <div class="text-xs font-mono text-slate-400 whitespace-pre-wrap bg-slate-900/50 p-2 rounded border border-slate-800/50">{{ item.cot_trace }}</div>
-                                    </div>
-                                    <div v-if="item.decisions && item.decisions.some(d => d.exec_error)" class="space-y-1">
-                                        <div class="text-[10px] font-bold text-rose-500/80 uppercase tracking-wider mt-2">Execution Errors</div>
-                                        <div v-for="(d, di) in item.decisions" :key="di" v-if="d.exec_error" class="text-[11px] font-mono text-rose-300 bg-rose-500/10 border border-rose-500/30 rounded px-2 py-1">
-                                            {{ d.symbol }} {{ d.action }} -> {{ d.exec_error }}
-                                        </div>
-                                    </div>
-                                    <div>
-                                        <div class="text-[10px] font-bold text-blue-600/80 uppercase tracking-wider mb-1">User Prompt</div>
-                                        <div class="text-xs font-mono text-slate-500 whitespace-pre-wrap bg-slate-900/50 p-2 rounded border border-slate-800/50 max-h-32 overflow-y-auto">{{ item.user_prompt }}</div>
-                                    </div>
+                                    <button
+                                        class="inline-flex items-center gap-1 px-2 py-1 rounded text-[11px] text-slate-300 bg-slate-900/70 border border-slate-700 hover:bg-slate-800 hover:border-slate-500"
+                                        @click.stop="openHistoryDetail(item)"
+                                    >
+                                        <span>查看详情</span>
+                                        <svg xmlns="http://www.w3.org/2000/svg" class="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 10l-3 3-3-3" />
+                                        </svg>
+                                    </button>
                                 </div>
                             </div>
                         </div>
                     </div>
+
+                    <!-- History Detail Modal -->
+                    <transition name="fade">
+                        <div
+                            v-if="selectedHistoryItem"
+                            class="fixed inset-0 z-40 bg-black/60 backdrop-blur-sm modal-backdrop flex items-center justify-center px-4"
+                            @click="closeHistoryDetail"
+                        >
+                            <div
+                                class="bg-slate-900 border border-slate-700 rounded-xl max-w-4xl w-full max-h-[80vh] overflow-hidden shadow-2xl shadow-black/40"
+                                @click.stop
+                            >
+                                <div class="px-4 py-3 border-b border-slate-700 flex items-center justify-between bg-slate-950/80">
+                                    <div class="flex flex-col gap-1">
+                                        <div class="text-xs font-mono text-slate-400">
+                                            {{ formatTime(selectedHistoryItem.timestamp) }}
+                                        </div>
+                                        <div class="flex flex-wrap gap-1" v-if="selectedHistoryItem.decisions && selectedHistoryItem.decisions.length > 0">
+                                            <span
+                                                v-for="(d, di) in selectedHistoryItem.decisions"
+                                                :key="di"
+                                                class="inline-flex items-center gap-1 text-[11px] font-bold px-1.5 py-0.5 rounded border"
+                                                :class="getExecStatusColor(d.exec_status || (d.action && d.action !== 'wait' ? 'unknown' : ''))"
+                                            >
+                                                <span>{{ d.symbol }} {{ d.action }}</span>
+                                            </span>
+                                        </div>
+                                    </div>
+                                    <button
+                                        class="text-xs text-slate-400 hover:text-slate-200 px-2 py-1 rounded hover:bg-slate-800"
+                                        @click="closeHistoryDetail"
+                                    >
+                                        关闭
+                                    </button>
+                                </div>
+                                <div class="p-4 space-y-4 text-xs font-mono text-slate-300 bg-slate-950/60">
+                                    <div>
+                                        <div class="text-[10px] font-bold text-yellow-500/80 uppercase tracking-wider mb-1">Reasoning</div>
+                                        <div class="whitespace-pre-wrap bg-slate-900/60 border border-slate-800/70 rounded p-2 max-h-40 overflow-y-auto">
+                                            {{ selectedHistoryItem.cot_trace }}
+                                        </div>
+                                    </div>
+                                    <div v-if="selectedHistoryItem.decisions && selectedHistoryItem.decisions.some(d => d.exec_error)" class="space-y-1">
+                                        <div class="text-[10px] font-bold text-rose-500/80 uppercase tracking-wider mt-2">Execution Errors</div>
+                                        <div
+                                            v-for="(d, di) in selectedHistoryItem.decisions"
+                                            :key="'err-' + di"
+                                            v-if="d.exec_error"
+                                            class="text-[11px] text-rose-300 bg-rose-500/10 border border-rose-500/30 rounded px-2 py-1"
+                                        >
+                                            {{ d.symbol }} {{ d.action }} -> {{ d.exec_error }}
+                                        </div>
+                                    </div>
+                                    <div>
+                                        <div class="text-[10px] font-bold text-blue-500/80 uppercase tracking-wider mb-1">User Prompt</div>
+                                        <div class="whitespace-pre-wrap bg-slate-900/60 border border-slate-800/70 rounded p-2 max-h-40 overflow-y-auto text-slate-400">
+                                            {{ selectedHistoryItem.user_prompt }}
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </transition>
 
                 </div>
             </div>
@@ -540,11 +557,6 @@
                     runtime_minutes: 0,
                     call_count: 0
                 });
-                const levSymbol = ref('BTCUSDT');
-                const levValue = ref(5);
-                const levLoading = ref(false);
-                const levMessage = ref('');
-                const levError = ref(false);
                 const closeAllLoading = ref(false);
                 const closeAllMessage = ref('');
                 const closeAllError = ref(false);
@@ -552,14 +564,9 @@
                 const decision = ref(null);
                 const history = ref([]);
                 const tradeHistory = ref([]); // 新增：历史交易记录
+                const selectedHistoryItem = ref(null);
                 const currentTime = ref('');
 
-                const loopInterval = ref(180);        // 后端当前生效的周期（秒）
-                const loopIntervalLocal = ref(180);   // 表单中的本地编辑值
-                const loopSaving = ref(false);
-                const loopMessage = ref('');
-                const loopError = ref(false);
-                
                 const tabs = [
                     { id: 'reasoning', name: '🧠 推理过程' },
                     { id: 'user_prompt', name: '👤 用户提示' },
@@ -575,13 +582,7 @@
                             state.value = data.context || {};
                             marketData.value = data.market_data || {};
                             decision.value = data.decision || null;
-                            tradeHistory.value = data.trade_history || []; // 更新交易历史
-                            if (typeof data.loop_interval_seconds === 'number' && data.loop_interval_seconds > 0) {
-                                loopInterval.value = data.loop_interval_seconds;
-                                if (!loopSaving.value) {
-                                    loopIntervalLocal.value = data.loop_interval_seconds;
-                                }
-                            }
+                            tradeHistory.value = data.trade_history || []; // 新增：历史交易记录
                         }
                         currentTime.value = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
                     } catch (e) {
@@ -594,13 +595,7 @@
                         const res = await fetch('/api/history');
                         const data = await res.json();
                         if (Array.isArray(data)) {
-                            // 保留已展开项的状态，避免轮询刷新时自动收起
-                            const prev = history.value || [];
-                            const expandedMap = new Map(prev.map(item => [item.timestamp, item.expanded]));
-                            history.value = data.map(item => ({
-                                ...item,
-                                expanded: expandedMap.get(item.timestamp) ?? false,
-                            }));
+                            history.value = data;
                         }
                     } catch (e) {
                         console.error("Fetch history error", e);
@@ -610,38 +605,6 @@
                 const reversedHistory = computed(() => {
                     return [...history.value].reverse();
                 });
-
-                const applyLeverage = async () => {
-                    levMessage.value = '';
-                    levError.value = false;
-                    if (!levSymbol.value || !levValue.value || levValue.value <= 0) {
-                        levMessage.value = '请输入有效的交易对和杠杆倍数';
-                        levError.value = true;
-                        return;
-                    }
-                    levLoading.value = true;
-                    try {
-                        const res = await fetch('/api/set_leverage', {
-                            method: 'POST',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({ symbol: levSymbol.value.trim().toUpperCase(), leverage: levValue.value })
-                        });
-                        const data = await res.json();
-                        if (!res.ok) {
-                            levMessage.value = data.error || '设置杠杆失败';
-                            levError.value = true;
-                        } else {
-                            levMessage.value = '杠杆已更新';
-                            levError.value = false;
-                        }
-                    } catch (e) {
-                        console.error(e);
-                        levMessage.value = '请求失败，请检查后端服务';
-                        levError.value = true;
-                    } finally {
-                        levLoading.value = false;
-                    }
-                };
 
                 const closeAllPositions = async () => {
                     closeAllMessage.value = '';
@@ -670,40 +633,6 @@
                     }
                 };
 
-                const updateLoopInterval = async () => {
-                    loopMessage.value = '';
-                    loopError.value = false;
-                    const val = Number(loopIntervalLocal.value);
-                    if (!val || val < 30 || val > 900) {
-                        loopMessage.value = '请输入 30–900 之间的秒数';
-                        loopError.value = true;
-                        return;
-                    }
-                    loopSaving.value = true;
-                    try {
-                        const res = await fetch('/api/loop_interval', {
-                            method: 'POST',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({ loop_interval_seconds: val })
-                        });
-                        const data = await res.json();
-                        if (!res.ok) {
-                            loopMessage.value = data.error || '更新循环周期失败';
-                            loopError.value = true;
-                        } else {
-                            loopInterval.value = val;
-                            loopMessage.value = `已更新为 ${val} 秒（约 ${(val / 60).toFixed(1)} 分钟），将从下一周期开始生效`;
-                            loopError.value = false;
-                        }
-                    } catch (e) {
-                        console.error(e);
-                        loopMessage.value = '请求失败，请检查后端服务';
-                        loopError.value = true;
-                    } finally {
-                        loopSaving.value = false;
-                    }
-                };
-
                 const confirmCloseAll = async () => {
                     if (!state.value.positions || state.value.positions.length === 0) {
                         return;
@@ -711,6 +640,14 @@
                     const ok = window.confirm(`确认一键平仓当前全部 ${state.value.positions.length} 个持仓？此操作将直接在币安实盘执行，无法撤销！`);
                     if (!ok) return;
                     await closeAllPositions();
+                };
+
+                const openHistoryDetail = (item) => {
+                    selectedHistoryItem.value = item;
+                };
+
+                const closeHistoryDetail = () => {
+                    selectedHistoryItem.value = null;
                 };
 
                 onMounted(() => {
@@ -787,23 +724,14 @@
                     formatTime,
                     tabs,
                     activeTab,
-                    levSymbol,
-                    levValue,
-                    levLoading,
-                    levMessage,
-                    levError,
                     closeAllLoading,
                     closeAllMessage,
                     closeAllError,
-                    applyLeverage,
                     closeAllPositions,
                     confirmCloseAll,
-                    loopInterval,
-                    loopIntervalLocal,
-                    loopSaving,
-                    loopMessage,
-                    loopError,
-                    updateLoopInterval
+                    selectedHistoryItem,
+                    openHistoryDetail,
+                    closeHistoryDetail
                 };
             }
         }).mount('#app');

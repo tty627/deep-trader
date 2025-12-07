@@ -151,12 +151,25 @@ func main() {
 			fmt.Println("📋 [AI 决策列表]:")
 			
 			// 验证所有决策
-			if err := ValidateDecisions(decision.Decisions, accountInfo.TotalEquity, btcEthLeverage, altcoinLeverage); err != nil {
+			if err := ValidateDecisions(decision.Decisions, accountInfo, btcEthLeverage, altcoinLeverage); err != nil {
 				fmt.Printf("❌ 风控拒绝: %v\n", err)
 			} else {
 				// 执行决策（使用索引，方便在 FullDecision 中记录执行结果，供前端展示）
 				for i := range decision.Decisions {
 					d := &decision.Decisions[i]
+					
+					// 对于非交易类动作，直接标记并跳过执行，避免调用交易所API
+					if d.Action == "wait" {
+						fmt.Printf("   ⏸️  %s: 观望 (Wait)\n", d.Symbol)
+						d.ExecStatus = "success"
+						continue
+					}
+					if d.Action == "hold" {
+						fmt.Printf("   ✊  %s: 持仓 (Hold)\n", d.Symbol)
+						d.ExecStatus = "success"
+						continue
+					}
+
 					fmt.Printf("   👉 %s %s", d.Symbol, d.Action)
 					if d.Action == "open_long" || d.Action == "open_short" {
 						fmt.Printf(" | size: $%.0f | lev: %dx", d.PositionSizeUSD, d.Leverage)

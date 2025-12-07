@@ -165,11 +165,12 @@ type Decision struct {
 	Action string `json:"action"` // 动作: "open_long", "open_short", "close_long", "close_short", "wait", etc.
 
 	// 开仓参数
-	Leverage        int     `json:"leverage,omitempty"`          // 建议杠杆倍数
-	PositionSizeUSD float64 `json:"position_size_usd,omitempty"` // 建议仓位大小 (USDT)
-	StopLoss        float64 `json:"stop_loss,omitempty"`         // 建议止损价格
-	TakeProfit      float64 `json:"take_profit,omitempty"`       // 建议止盈价格
-	ProfitTarget    float64 `json:"profit_target,omitempty"`     // 兼容 nofx prompt
+	Leverage        int     `json:"leverage,omitempty"`            // 建议杠杆倍数
+	PositionSizeUSD float64 `json:"position_size_usd,omitempty"`   // 建议名义仓位大小 (USDT)
+	PositionPercent float64 `json:"position_percent,omitempty"`    // 可选：相对仓位(0-100 或 0-1)，用于按账户规模动态计算 position_size_usd
+	StopLoss        float64 `json:"stop_loss,omitempty"`           // 建议止损价格
+	TakeProfit      float64 `json:"take_profit,omitempty"`         // 建议止盈价格
+	ProfitTarget    float64 `json:"profit_target,omitempty"`       // 兼容 nofx prompt
 
 	// 调整参数
 	NewStopLoss     float64 `json:"new_stop_loss,omitempty"`    // 新止损价格 (用于 update_stop_loss)
@@ -184,7 +185,7 @@ type Decision struct {
 	Confidence            int     `json:"confidence,omitempty"`             // AI 信心度 (0-100)
 	RiskUSD               float64 `json:"risk_usd,omitempty"`               // 预估最大风险金额 (USDT)
 	InvalidationCondition string  `json:"invalidation_condition,omitempty"` // 失效条件
-	Reasoning  string  `json:"reasoning"`            // 决策理由摘要
+	Reasoning             string  `json:"reasoning"`                        // 决策理由摘要
 }
 
 // FullDecision AI的完整决策（包含思维链）

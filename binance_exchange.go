@@ -1017,6 +1017,27 @@ func (e *BinanceExchange) ExecuteDecision(d Decision) error {
 		}
 	}
 
+	// 5. 执行开仓下单 (此前代码漏掉了这一步)
+	if d.Action == "open_long" || d.Action == "open_short" {
+		service := e.Client.NewCreateOrderService().
+			Symbol(symbol).
+			Side(side).
+			Type(futures.OrderTypeMarket).
+			Quantity(qtyStr)
+
+		if usePositionSide {
+			service = service.PositionSide(positionSide)
+		}
+
+		ctx, cancel := newAPICtx()
+		defer cancel()
+		_, err := service.Do(ctx)
+		if err != nil {
+			return fmt.Errorf("Binance Open Order Failed: %v", err)
+		}
+		log.Printf("✅ Binance Open Order Success: %s %s Qty:%s", d.Action, symbol, qtyStr)
+	}
+
 	// 6. 开仓后，设置止损和止盈（如果有）
 	if (d.Action == "open_long" || d.Action == "open_short") && (d.StopLoss > 0 || d.TakeProfit > 0) {
 		log.Printf("正在设置止损止盈 for %s...", symbol)
