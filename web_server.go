@@ -15,6 +15,7 @@ type WebServer struct {
 	latestDecision   *FullDecision
 	history          []*FullDecision
 	marketData       map[string]*MarketData
+	tradeHistory     []TradeRecord // 缓存最近的交易历史
 	loopIntervalSecs int // 当前 AI 循环周期（秒）
 }
 
@@ -68,6 +69,13 @@ func (s *WebServer) UpdateState(ctx *Context, decision *FullDecision, md map[str
 	}
 }
 
+// UpdateTradeHistory 更新交易历史缓存
+func (s *WebServer) UpdateTradeHistory(history []TradeRecord) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.tradeHistory = history
+}
+
 // Start 启动 HTTP 服务
 func (s *WebServer) Start(port int) {
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
@@ -82,6 +90,7 @@ func (s *WebServer) Start(port int) {
 			"context":              s.latestContext,
 			"decision":             s.latestDecision,
 			"market_data":          s.marketData,
+			"trade_history":        s.tradeHistory,
 			"loop_interval_seconds": s.loopIntervalSecs,
 		}
 

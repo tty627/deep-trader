@@ -61,17 +61,16 @@ func main() {
 		exchange = NewSimulatedExchange(1000.0) // 1000 U 初始资金
 	}
 
-	brain := NewAIBrain(cfg.AIAPIKey, cfg.AIAPIURL, cfg.AIModel)
+	brain := NewAIBrain(cfg.AIAPIKey, cfg.AIAPIURL, cfg.AIModel, cfg.BinanceProxyURL)
 
 	// 启动 Web 监控（携带默认循环周期配置）
 	server := NewWebServer(cfg.LoopIntervalSeconds)
 	server.Start(8080)
 
-	// 交易币种
-	tradingCoins := []string{"BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT", "DOGEUSDT"}
-
-	btcEthLeverage := 10
-	altcoinLeverage := 5
+	// 从配置文件读取交易设置
+	tradingCoins := cfg.TradingSymbols
+	btcEthLeverage := cfg.BTCETHLeverage
+	altcoinLeverage := cfg.AltcoinLeverage
 
 	callCount := 0
 	runtimeStart := time.Now()
@@ -110,6 +109,7 @@ func main() {
 			Account:         accountInfo,
 			Positions:       positions,
 			MarketDataMap:   marketData,
+			Sectors:         calculateSectorHeat(marketData), // 计算板块热度
 			BTCETHLeverage:  btcEthLeverage,
 			AltcoinLeverage: altcoinLeverage,
 			SharpeRatio:     sharpeRatio,
@@ -150,16 +150,44 @@ func main() {
 		} else {
 			fmt.Println("📋 [AI 决策列表]:")
 			
-			// 验证所有决策
-			if err := ValidateDecisions(decision.Decisions, accountInfo.TotalEquity, btcEthLeverage, altcoinLeverage); err != nil {
+			// 验证所有决策（传入当前市场价格，用于日内风险评估）
+			if err := ValidateDecisions(decision.Decisions, accountInfo, btcEthLeverage, altcoinLeverage, marketData); err != nil {
 				fmt.Printf("❌ 风控拒绝: %v\n", err)
 			} else {
 				// 执行决策（使用索引，方便在 FullDecision 中记录执行结果，供前端展示）
 				for i := range decision.Decisions {
 					d := &decision.Decisions[i]
+					
+					// 对于非交易类动作，直接标记并跳过执行，避免调用交易所API
+					if d.Action == "wait" {
+						fmt.Printf("   ⏸️  %s: 观望 (Wait)\n", d.Symbol)
+						d.ExecStatus = "success"
+						continue
+					}
+					if d.Action == "hold" {
+						fmt.Printf("   ✊  %s: 持仓 (Hold)\n", d.Symbol)
+						d.ExecStatus = "success"
+						continue
+					}
+
 					fmt.Printf("   👉 %s %s", d.Symbol, d.Action)
 					if d.Action == "open_long" || d.Action == "open_short" {
 						fmt.Printf(" | size: $%.0f | lev: %dx", d.PositionSizeUSD, d.Leverage)
+						// 简单打印预估风险/收益百分比，便于人工监督
+						if md, ok := marketData[d.Symbol]; ok && md != nil && md.CurrentPrice > 0 && d.StopLoss > 0 && d.TakeProfit > 0 {
+							entry := md.CurrentPrice
+							var riskPct, rewardPct float64
+							if d.Action == "open_long" {
+								riskPct = (entry - d.StopLoss) / entry * 100
+								rewardPct = (d.TakeProfit - entry) / entry * 100
+							} else {
+								riskPct = (d.StopLoss - entry) / entry * 100
+								rewardPct = (entry - d.TakeProfit) / entry * 100
+							}
+							if riskPct > 0 {
+								fmt.Printf(" | RR≈%.2f:1 (risk≈%.2f%%, reward≈%.2f%%)", rewardPct/riskPct, riskPct, rewardPct)
+							}
+						}
 					}
 					
 					if err := exchange.ExecuteDecision(*d); err != nil {
@@ -176,7 +204,30 @@ func main() {
 		}
 
 		// 再次更新 Web 状态，将实际执行结果也推送到前端
+		// 获取历史记录（如果有）
+		history := exchange.GetTradeHistory()
 		server.UpdateState(ctx, decision, marketData)
+		if history != nil {
+			server.UpdateTradeHistory(history)
+		}
+
+		// 如果是在真实币安模式下：当某个交易对已经没有持仓时，清理遗留的止损/止盈挂单
+		if be, ok := exchange.(*BinanceExchange); ok {
+			positionMap := make(map[string]bool)
+			for _, p := range positions {
+				positionMap[p.Symbol] = true
+			}
+			for _, sym := range tradingCoins {
+				if !positionMap[sym] {
+					if err := be.CancelStopLossOrders(sym); err != nil {
+						log.Printf("⚠️ Cleanup StopLoss orders failed for %s: %v", sym, err)
+					}
+					if err := be.CancelTakeProfitOrders(sym); err != nil {
+						log.Printf("⚠️ Cleanup TakeProfit orders failed for %s: %v", sym, err)
+					}
+				}
+			}
+		}
 
 		// 根据当前配置的循环周期休眠（前端可动态修改）
 		intervalSec := server.GetLoopIntervalSeconds()
@@ -186,226 +237,6 @@ func main() {
 		fmt.Printf("\n⏳ 等待 %d 秒（%.2f 分钟）进入下一周期...\n", intervalSec, float64(intervalSec)/60.0)
 		time.Sleep(time.Duration(intervalSec) * time.Second)
 	}
-}
-
-// SimulatedExchange 模拟交易所，实现 Exchange 接口
-type SimulatedExchange struct {
-	account       AccountInfo
-	positions     map[string]PositionInfo
-	marketData    map[string]*MarketData
-	initialEquity float64
-}
-
-// NewSimulatedExchange 创建一个新的模拟交易所实例
-func NewSimulatedExchange(initialCapital float64) *SimulatedExchange {
-	return &SimulatedExchange{
-		account: AccountInfo{
-			TotalEquity:      initialCapital,
-			AvailableBalance: initialCapital,
-			UnrealizedPnL:    0,
-			TotalPnL:         0,
-			TotalPnLPct:      0,
-			MarginUsed:       0,
-			MarginUsedPct:    0,
-			PositionCount:    0,
-		},
-		positions:     make(map[string]PositionInfo),
-		marketData:    make(map[string]*MarketData),
-		initialEquity: initialCapital,
-	}
-}
-
-// FetchMarketData 为每个交易对生成简单的模拟行情
-func (s *SimulatedExchange) FetchMarketData(symbols []string) error {
-	// 1. 模拟价格变动
-	for _, symbol := range symbols {
-		md, ok := s.marketData[symbol]
-		if !ok {
-			md = &MarketData{Symbol: symbol}
-		}
-		if md.CurrentPrice == 0 {
-			md.CurrentPrice = 100.0 // 初始价格
-		} else {
-			// 简单的随机游走: -0.5% 到 +0.5%
-			// 这里只是演示，实际上可以用更复杂的逻辑
-			md.CurrentPrice += 0.1 // 简单递增测试
-		}
-		s.marketData[symbol] = md
-	}
-
-	// 2. 更新账户盈亏
-	var totalUnrealizedPnL float64
-	var totalMarginUsed float64
-
-	for k, pos := range s.positions {
-		md, ok := s.marketData[pos.Symbol]
-		if !ok {
-			continue
-		}
-		
-		// 更新标记价格
-		pos.MarkPrice = md.CurrentPrice
-		
-		// 计算未实现盈亏
-		// 多单盈亏 = (当前价 - 开仓价) * 数量
-		// 空单盈亏 = (开仓价 - 当前价) * 数量
-		if pos.Side == "long" {
-			pos.UnrealizedPnL = (pos.MarkPrice - pos.EntryPrice) * pos.Quantity
-		} else {
-			pos.UnrealizedPnL = (pos.EntryPrice - pos.MarkPrice) * pos.Quantity
-		}
-		
-		// 更新持仓信息
-		if pos.MarginUsed > 0 {
-			pos.UnrealizedPnLPct = (pos.UnrealizedPnL / pos.MarginUsed) * 100
-		}
-		s.positions[k] = pos
-
-		totalUnrealizedPnL += pos.UnrealizedPnL
-		totalMarginUsed += pos.MarginUsed
-	}
-
-	// 更新账户信息
-	s.account.UnrealizedPnL = totalUnrealizedPnL
-	s.account.MarginUsed = totalMarginUsed
-	s.account.TotalEquity = s.account.AvailableBalance + s.account.MarginUsed + s.account.UnrealizedPnL
-	if s.account.TotalEquity > 0 {
-		s.account.MarginUsedPct = (s.account.MarginUsed / s.account.TotalEquity) * 100
-	}
-
-	// 根据初始净值计算累计盈亏
-	if s.initialEquity > 0 {
-		s.account.TotalPnL = s.account.TotalEquity - s.initialEquity
-		s.account.TotalPnLPct = (s.account.TotalPnL / s.initialEquity) * 100
-	}
-
-	return nil
-}
-
-func (s *SimulatedExchange) GetAccountInfo() AccountInfo {
-	return s.account
-}
-
-func (s *SimulatedExchange) GetPositions() []PositionInfo {
-	positions := make([]PositionInfo, 0, len(s.positions))
-	for _, p := range s.positions {
-		positions = append(positions, p)
-	}
-	return positions
-}
-
-func (s *SimulatedExchange) GetMarketData() map[string]*MarketData {
-	return s.marketData
-}
-
-func (s *SimulatedExchange) ExecuteDecision(d Decision) error {
-	fmt.Printf("Simulated execution for %s: %s size $%.2f\n", d.Symbol, d.Action, d.PositionSizeUSD)
-
-	md, ok := s.marketData[d.Symbol]
-	if !ok {
-		return fmt.Errorf("no market data for %s", d.Symbol)
-	}
-	price := md.CurrentPrice
-	if price <= 0 {
-		return fmt.Errorf("invalid price for %s", d.Symbol)
-	}
-
-	switch d.Action {
-	case "open_long", "open_short":
-		// 检查余额
-		marginRequired := d.PositionSizeUSD / float64(d.Leverage)
-		if s.account.AvailableBalance < marginRequired {
-			return fmt.Errorf("insufficient balance: have %.2f, need %.2f", s.account.AvailableBalance, marginRequired)
-		}
-
-		// 计算数量
-		quantity := d.PositionSizeUSD / price
-		side := "long"
-		if d.Action == "open_short" {
-			side = "short"
-		}
-
-		// 检查是否已有持仓
-		if pos, exists := s.positions[d.Symbol]; exists {
-			if pos.Side != side {
-				return fmt.Errorf("conflict: existing %s position for %s", pos.Side, d.Symbol)
-			}
-			// 加仓逻辑 (简单平均价格)
-			totalCost := pos.EntryPrice * pos.Quantity
-			newCost := price * quantity
-			totalQty := pos.Quantity + quantity
-			avgPrice := (totalCost + newCost) / totalQty
-
-			pos.EntryPrice = avgPrice
-			pos.Quantity = totalQty
-			pos.MarginUsed += marginRequired
-			pos.Leverage = d.Leverage // 更新杠杆
-			s.positions[d.Symbol] = pos
-		} else {
-			// 新建仓位
-			s.positions[d.Symbol] = PositionInfo{
-				Symbol:     d.Symbol,
-				Side:       side,
-				EntryPrice: price,
-				MarkPrice:  price,
-				Quantity:   quantity,
-				Leverage:   d.Leverage,
-				MarginUsed: marginRequired,
-				UpdateTime: time.Now().UnixMilli(),
-			}
-			s.account.PositionCount++
-		}
-
-		// 扣除可用余额
-		s.account.AvailableBalance -= marginRequired
-		s.account.MarginUsed += marginRequired
-
-	case "close_long", "close_short":
-		pos, exists := s.positions[d.Symbol]
-		if !exists {
-			return fmt.Errorf("no position to close for %s", d.Symbol)
-		}
-		
-		// 验证方向
-		expectedSide := "long"
-		if d.Action == "close_short" {
-			expectedSide = "short"
-		}
-		if pos.Side != expectedSide {
-			return fmt.Errorf("position side mismatch: have %s, want close %s", pos.Side, expectedSide)
-		}
-
-		// 计算平仓盈亏
-		var pnl float64
-		if pos.Side == "long" {
-			pnl = (price - pos.EntryPrice) * pos.Quantity
-		} else {
-			pnl = (pos.EntryPrice - price) * pos.Quantity
-		}
-
-		// 返还资金 = 保证金 + 盈亏
-		amountToReturn := pos.MarginUsed + pnl
-		
-		s.account.AvailableBalance += amountToReturn
-		s.account.TotalPnL += pnl
-		s.account.MarginUsed -= pos.MarginUsed
-		
-		// 移除持仓
-		delete(s.positions, d.Symbol)
-		s.account.PositionCount--
-		
-		log.Printf("Closed %s position for %s. PnL: %.2f", pos.Side, d.Symbol, pnl)
-	}
-
-	return nil
-}
-
-func wrapText(text string, width int) string {
-	if len(text) < width {
-		return text
-	}
-    // 简单换行处理
-    return text 
 }
 
 // CalculateRuntimeSharpe 计算运行时夏普比率 (简化版)
@@ -454,4 +285,86 @@ func CalculateRuntimeSharpe(equityCurve []float64) float64 {
 	// 放大系数：通常夏普是年化的，这里是周期的，为了让数字好看点（接近常见范围），乘以 sqrt(周期数) 的某种因子
 	// 这里简单返回 Mean / StdDev，AI 能理解相对大小即可
 	return mean / stdDev
+}
+
+// wrapText wraps the text to the specified width.
+func wrapText(text string, width int) string {
+	if width <= 0 {
+		return text
+	}
+
+	var sb strings.Builder
+	lines := strings.Split(text, "\n")
+
+	for i, line := range lines {
+		if i > 0 {
+			sb.WriteString("\n")
+		}
+
+		if len(line) <= width {
+			sb.WriteString(line)
+			continue
+		}
+
+		words := strings.Fields(line)
+		if len(words) == 0 {
+			continue
+		}
+
+		currentLineLen := 0
+		for _, word := range words {
+			wordLen := len(word)
+			if currentLineLen+wordLen+1 > width && currentLineLen > 0 {
+				sb.WriteString("\n")
+				currentLineLen = 0
+			} else if currentLineLen > 0 {
+				sb.WriteString(" ")
+				currentLineLen++
+			}
+			sb.WriteString(word)
+			currentLineLen += wordLen
+		}
+	}
+	return sb.String()
+}
+
+// calculateSectorHeat 计算板块热度
+func calculateSectorHeat(dataMap map[string]*MarketData) []SectorInfo {
+	// 定义板块 (你可以根据需要扩展)
+	sectors := []SectorInfo{
+		{Name: "Major", Symbols: []string{"BTCUSDT", "ETHUSDT", "BNBUSDT", "SOLUSDT"}},
+		{Name: "Meme", Symbols: []string{"DOGEUSDT", "SHIBUSDT", "PEPEUSDT", "BONKUSDT", "WIFUSDT"}},
+		{Name: "AI", Symbols: []string{"FETUSDT", "RNDRUSDT", "WLDUSDT", "ARKMUSDT"}},
+		{Name: "L2", Symbols: []string{"ARBUSDT", "OPUSDT", "MATICUSDT"}},
+	}
+
+	var results []SectorInfo
+
+	for _, sector := range sectors {
+		var totalChange1h, totalChange4h float64
+		var count int
+		var maxChange float64 = -9999
+		var leadingSymbol string
+
+		for _, sym := range sector.Symbols {
+			if data, ok := dataMap[sym]; ok {
+				totalChange1h += data.PriceChange1h
+				totalChange4h += data.PriceChange4h
+				count++
+				
+				if data.PriceChange1h > maxChange {
+					maxChange = data.PriceChange1h
+					leadingSymbol = sym
+				}
+			}
+		}
+
+		if count > 0 {
+			sector.AvgChange1h = totalChange1h / float64(count)
+			sector.AvgChange4h = totalChange4h / float64(count)
+			sector.LeadingSymbol = leadingSymbol
+			results = append(results, sector)
+		}
+	}
+	return results
 }

@@ -18,8 +18,13 @@ type Config struct {
     AIModel  string `json:"ai_model"`
 
     // AI 循环周期（秒），用于控制主循环的休眠时间
-    // 建议范围：30 - 900 秒。默认 150 秒（2.5 分钟）
+    // 建议范围：90 - 900 秒。默认 120 秒（2 分钟），以适配 LLM ~90 秒响应延迟
     LoopIntervalSeconds int `json:"loop_interval_seconds"`
+
+    // 交易配置
+    TradingSymbols  []string `json:"trading_symbols"`   // 交易币种列表
+    BTCETHLeverage  int      `json:"btc_eth_leverage"`  // BTC/ETH 最大杠杆
+    AltcoinLeverage int      `json:"altcoin_leverage"`  // 山寨币最大杠杆
 
     // 币安实盘相关（可选，不填则使用模拟盘）
     BinanceAPIKey    string `json:"binance_api_key"`
@@ -67,10 +72,23 @@ func LoadConfig() (*Config, error) {
             }
         }
     }
-    // 默认值 150 秒（2.5 分钟）
+    // 默认值 120 秒（2 分钟），与 LLM 平均响应时间匹配
     if cfg.LoopIntervalSeconds <= 0 {
-        cfg.LoopIntervalSeconds = 150
+        cfg.LoopIntervalSeconds = 120
     }
+
+    // 交易配置默认值
+    if len(cfg.TradingSymbols) == 0 {
+        cfg.TradingSymbols = []string{"BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT", "DOGEUSDT"}
+    }
+    if cfg.BTCETHLeverage <= 0 {
+        // 稳健模式：BTC/ETH 默认 10x
+        cfg.BTCETHLeverage = 10
+    }
+	if cfg.AltcoinLeverage <= 0 {
+		// 稳健模式：山寨币默认 10x
+		cfg.AltcoinLeverage = 10
+	}
 
     // 至少要有 AIAPIKey
     if cfg.AIAPIKey == "" {
