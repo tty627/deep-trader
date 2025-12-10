@@ -1,0 +1,50 @@
+# Git
+.git
+.gitignore
+
+# IDE
+.idea
+.vscode
+*.swp
+*.swo
+
+# Build artifacts
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+deep_trader
+
+# Test files
+*_test.go
+*.test
+
+# Configuration (should be mounted or use env vars)
+config.local.json
+
+# Data files (should be mounted as volumes)
+*.db
+*.db-wal
+*.db-shm
+trade_history.json
+detailed_log.txt
+
+# Exports
+exports/
+backtest_reports/
+
+# Logs
+*.log
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Documentation
+*.md
+!README.md
+docs/
+
+# Screenshots
+screenshots/

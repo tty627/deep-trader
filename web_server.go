@@ -253,6 +253,228 @@ func (s *WebServer) Start(port int) {
 		_ = json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
 	})
 
+	// ===== 新增 API 端点 =====
+
+	// 获取净值历史: GET /api/equity_history?limit=100
+	http.HandleFunc("/api/equity_history", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			w.WriteHeader(http.StatusMethodNotAllowed)
+			return
+		}
+
+		storage := GetStorage()
+		if storage == nil {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			_ = json.NewEncoder(w).Encode(map[string]string{"error": "storage not initialized"})
+			return
+		}
+
+		limit := 1000
+		if l := r.URL.Query().Get("limit"); l != "" {
+			if parsed, err := fmt.Sscanf(l, "%d", &limit); err == nil && parsed > 0 {
+				// use parsed limit
+			}
+		}
+
+		snapshots, err := storage.GetEquityHistory(limit)
+		if err != nil {
+			w.WriteHeader(http.StatusInternalServerError)
+			_ = json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+			return
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(snapshots)
+	})
+
+	// 获取交易记录: GET /api/trades?limit=50&offset=0
+	http.HandleFunc("/api/trades", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			w.WriteHeader(http.StatusMethodNotAllowed)
+			return
+		}
+
+		storage := GetStorage()
+		if storage == nil {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			_ = json.NewEncoder(w).Encode(map[string]string{"error": "storage not initialized"})
+			return
+		}
+
+		limit, offset := 50, 0
+		if l := r.URL.Query().Get("limit"); l != "" {
+			fmt.Sscanf(l, "%d", &limit)
+		}
+		if o := r.URL.Query().Get("offset"); o != "" {
+			fmt.Sscanf(o, "%d", &offset)
+		}
+
+		records, total, err := storage.GetTradeRecords(limit, offset)
+		if err != nil {
+			w.WriteHeader(http.StatusInternalServerError)
+			_ = json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+			return
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
+			"records": records,
+			"total":   total,
+			"limit":   limit,
+			"offset":  offset,
+		})
+	})
+
+	// 获取交易统计: GET /api/trade_stats
+	http.HandleFunc("/api/trade_stats", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			w.WriteHeader(http.StatusMethodNotAllowed)
+			return
+		}
+
+		storage := GetStorage()
+		if storage == nil {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			_ = json.NewEncoder(w).Encode(map[string]string{"error": "storage not initialized"})
+			return
+		}
+
+		stats, err := storage.GetTradeStats()
+		if err != nil {
+			w.WriteHeader(http.StatusInternalServerError)
+			_ = json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+			return
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(stats)
+	})
+
+	// 获取AI决策历史: GET /api/decisions?limit=50
+	http.HandleFunc("/api/decisions", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			w.WriteHeader(http.StatusMethodNotAllowed)
+			return
+		}
+
+		storage := GetStorage()
+		if storage == nil {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			_ = json.NewEncoder(w).Encode(map[string]string{"error": "storage not initialized"})
+			return
+		}
+
+		limit := 50
+		if l := r.URL.Query().Get("limit"); l != "" {
+			fmt.Sscanf(l, "%d", &limit)
+		}
+
+		decisions, err := storage.GetAIDecisions(limit)
+		if err != nil {
+			w.WriteHeader(http.StatusInternalServerError)
+			_ = json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+			return
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(decisions)
+	})
+
+	// 获取策略列表: GET /api/strategies
+	http.HandleFunc("/api/strategies", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			w.WriteHeader(http.StatusMethodNotAllowed)
+			return
+		}
+
+		sm := GetStrategyManager()
+		if sm == nil {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			_ = json.NewEncoder(w).Encode(map[string]string{"error": "strategy manager not initialized"})
+			return
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
+			"strategies": sm.ListStrategies(),
+			"active":     sm.GetActiveStrategyName(),
+		})
+	})
+
+	// 切换策略: POST /api/strategy/switch {name: "strategy_name"}
+	http.HandleFunc("/api/strategy/switch", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			w.WriteHeader(http.StatusMethodNotAllowed)
+			return
+		}
+
+		var req struct {
+			Name string `json:"name"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			w.WriteHeader(http.StatusBadRequest)
+			_ = json.NewEncoder(w).Encode(map[string]string{"error": "invalid json"})
+			return
+		}
+
+		sm := GetStrategyManager()
+		if sm == nil {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			_ = json.NewEncoder(w).Encode(map[string]string{"error": "strategy manager not initialized"})
+			return
+		}
+
+		if err := sm.SetActiveStrategy(req.Name); err != nil {
+			w.WriteHeader(http.StatusBadRequest)
+			_ = json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+			return
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]string{"status": "ok", "active": req.Name})
+	})
+
+	// 导出净值曲线: GET /api/export/equity?format=csv
+	http.HandleFunc("/api/export/equity", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			w.WriteHeader(http.StatusMethodNotAllowed)
+			return
+		}
+
+		format := r.URL.Query().Get("format")
+		if format == "" {
+			format = "csv"
+		}
+
+		filepath, err := ExportEquityToCSV("exports")
+		if err != nil {
+			w.WriteHeader(http.StatusInternalServerError)
+			_ = json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+			return
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]string{"status": "ok", "file": filepath})
+	})
+
+	// 导出交易记录: GET /api/export/trades?format=csv
+	http.HandleFunc("/api/export/trades", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			w.WriteHeader(http.StatusMethodNotAllowed)
+			return
+		}
+
+		filepath, err := ExportTradesToCSV("exports")
+		if err != nil {
+			w.WriteHeader(http.StatusInternalServerError)
+			_ = json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+			return
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]string{"status": "ok", "file": filepath})
+	})
+
 	addr := fmt.Sprintf(":%d", port)
 	log.Printf("🌍 Web Dashboard running at http://localhost%s", addr)
 	go func() {

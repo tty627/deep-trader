@@ -65,7 +65,7 @@ func NewAIBrain(apiKey, apiURL, model, proxyURL string) *AIBrain {
 // GetDecision 获取决策
 func (b *AIBrain) GetDecision(ctx *Context) (*FullDecision, error) {
 	// 1. 构建 Prompts
-	systemPrompt := buildSystemPrompt(ctx.Account.TotalEquity, ctx.BTCETHLeverage, ctx.AltcoinLeverage)
+	systemPrompt := buildSystemPrompt(ctx.Account.TotalEquity)
 	userPrompt := buildUserPrompt(ctx)
 
 	// 2. 调用 AI
@@ -87,77 +87,87 @@ func (b *AIBrain) GetDecision(ctx *Context) (*FullDecision, error) {
 	return fullDecision, nil
 }
 
-func buildSystemPrompt(accountEquity float64, btcEthLeverage, altcoinLeverage int) string {
+func buildSystemPrompt(accountEquity float64) string {
 	var sb strings.Builder
 
-	// Read the prompt template file
-	templateContent, err := os.ReadFile("extracted_prompts.md")
-	if err != nil {
-		log.Printf("Warning: Could not read extracted_prompts.md: %v. Using default short prompt.", err)
-		sb.WriteString("你是专业的加密货币交易AI。请根据市场数据做出交易决策。\\n\\n")
+	// 获取当前策略配置
+	var riskCfg RiskConfig
+	var strategyName, strategyDesc string
+	sm := GetStrategyManager()
+	if sm != nil {
+		riskCfg = sm.GetRiskConfig()
+		if strategy := sm.GetActiveStrategy(); strategy != nil {
+			strategyName = strategy.Name
+			strategyDesc = strategy.Description
+		}
 	} else {
-		sb.WriteString("你是专业的加密货币交易AI。请根据市场数据做出交易决策。\\n\\n")
-		sb.WriteString(string(templateContent))
-		sb.WriteString("\\n\\n")
+		// 回退默认配置
+		riskCfg = RiskConfig{
+			MaxRiskPerTrade:    0.25,
+			MaxTotalRisk:       0.40,
+			MinRiskRewardRatio: 2.0,
+			FixedLeverage:      15,
+			MaxMarginUsage:     0.70,
+		}
+		strategyName = "balanced"
+		strategyDesc = "中等风险，稳健交易"
 	}
-	// 硬约束（风险控制）
-	sb.WriteString("# 硬约束（风险控制）\\n")
-	sb.WriteString("1. 风险回报比: **默认必须 ≥ 1.5:1**（冒 1 单位风险，争取 1.5+ 单位收益）。在强趋势或小仓位时，可接受 **1.2:1** 左右的结构。\\n")
-	sb.WriteString("2. 单笔风险上限: **不超过账户净值约 3%**（用于高杠杆日内模式；风控会按止损与仓位自动缩小过大的仓位）\\n")
-	sb.WriteString(fmt.Sprintf("3. 杠杆限制: 山寨币最大%dx | BTC/ETH 最大%dx（如需更高杠杆，请在小仓位上试探，而非重仓梭哈）\\n", altcoinLeverage, btcEthLeverage))
-	sb.WriteString("4. 保证金使用率：避免单笔吃掉全部可用保证金，留出流动性应对波动\\n")
-	sb.WriteString("5. 开仓金额: 建议 ≥ 12 USDT（交易所最小名义价值约 10 USDT + 安全边际）\\n")
-	sb.WriteString("6. 所有开仓必须设置明确的止损价（stop_loss）和止盈价（take_profit），禁止无止损裸奔。\\n\\n")
 
-	// 交易频率与信号质量
-	sb.WriteString("# ⏱️ 交易频率认知\\n\\n")
-	sb.WriteString("- 优秀交易员：每天2-4笔 ≈ 每小时0.1-0.2笔\\n")
-	sb.WriteString("- 每小时>2笔 = 过度交易\\n")
-	sb.WriteString("- 单笔持仓时间≥30-60分钟\\n")
-	sb.WriteString("如果你发现自己每个周期都在交易 → 标准过低；若持仓<30分钟就平仓且非止损 → 过于急躁。\\\\n\\\\n")
+	// 1. 尝试加载策略专属 prompt 模板
+	promptLoaded := false
+	if sm != nil {
+		if promptContent, err := sm.GetPromptContent(); err == nil && promptContent != "" {
+			sb.WriteString(promptContent)
+			sb.WriteString("\n")
+			promptLoaded = true
+		}
+	}
 
-	sb.WriteString("# 🎯 开仓标准（5m/15m 日内模式）\\\\n\\\\n")
-	sb.WriteString("你的核心决策必须基于 **5分钟 (5m)**、**15分钟 (15m)**，并参考 **1小时 (1h) / 4小时 (4h)** 背景。\\\\n")
-	sb.WriteString("- **15m (Intraday Trend)**: 判断当前日内趋势方向（多头 / 空头 / 震荡），只在趋势清晰时进场。\\\\n")
-	sb.WriteString("- **5m (Entry Timing)**: 在 15m 方向确认的前提下，用 5m 结构寻找突破/回踩/假突破失败等入场机会。\\\\n")
-	sb.WriteString("- **1h/4h (Context)**: 用于识别更大级别支撑/阻力和波动环境，但**不要为了所谓“大趋势”而死扛明显错误的日内方向**。\\\\n")
-	sb.WriteString("- **3m (Micro-structure)**: 仅用于理解微观形态，避免因为 1–2 根 3m K 线的噪音而频繁开平仓。\\\\n")
-	sb.WriteString("开仓要求：在 **5m/15m 级别同时出现趋势方向一致 + 合理的止损/止盈结构 + Volume/OI/情绪配合** 时才考虑。\\\\n\\\\n")
+	// 2. 如果没有策略专属 prompt，使用通用模板
+	if !promptLoaded {
+		templateContent, err := os.ReadFile("extracted_prompts.md")
+		if err != nil {
+			log.Printf("Warning: Could not read extracted_prompts.md: %v. Using fallback system prompt.", err)
+			// 简化的回退提示
+			sb.WriteString("你是专业的加密货币交易 AI，在币安 USDT 永续市场执行有纪律的风险控制。\n")
+		} else {
+			sb.WriteString(string(templateContent))
+			sb.WriteString("\n")
+		}
+	}
 
-	// 夏普比率驱动的自适应（稳健模式）
-	sb.WriteString("# 🧬 夏普比率自我进化（稳健模式）\\n\\n")
-	sb.WriteString("- Sharpe < -2.0：市场波动可能不利，提高标准，寻找信心度 > 75 的机会。\\n")
-	sb.WriteString("- -2.0 ~ 0：**保持正常交易频率**，初期负夏普属正常现象。寻找信心度 > 60 的机会即可开仓，允许适度试错。\\n")
-	sb.WriteString("- > 0：状态良好，继续保持或适当增加仓位。\\n\\n")
-
-	// 额外提示：拥挤度与RSI
-	sb.WriteString("# 💡 关键提示\\n\\n")
-	sb.WriteString("- **拥挤度 (Crowded)**: \"Bullish_Crowded\" 并不意味着必须做空或观望。在强趋势中，拥挤是常态。如果价格行为（Price Action）配合，不要害怕顺势交易。\\n")
-	sb.WriteString("- **RSI 超买/超卖**: 在强劲趋势中，RSI > 70 或 < 30 可能会持续很久（钝化）。不要单纯因为 RSI 超买就看空，除非有明确的反转K线结构。\\n\\n")
-
-	// 决策流程提示
-	sb.WriteString("# 💡 关键提示\\n\\n")
-	sb.WriteString("- **拥挤度 (Crowded)**: \"Bullish_Crowded\" 并不意味着必须做空或观望。在强趋势中，拥挤是常态。如果价格行为（Price Action）配合，不要害怕顺势交易。\\n")
-	sb.WriteString("- **RSI 超买/超卖**: 在强劲趋势中，RSI > 70 或 < 30 可能会持续很久（钝化）。不要单纯因为 RSI 超买就看空，除非有明确的反转K线结构。\\n\\n")
-
-	// 决策流程提示
-	sb.WriteString("# 📋 决策流程\\n\\n")
-	sb.WriteString("1. 回顾夏普比率/盈亏 → 是否需要降频或暂停\\n")
-	sb.WriteString("2. 检查持仓 → 是否该止盈/止损/调整\\n")
-	sb.WriteString("3. 扫描候选币 + 多时间框 → 是否存在强信号\\n")
-	sb.WriteString("4. 先写思维链，再输出结构化JSON\\n\\n")
-
-	sb.WriteString("# 输出格式 (严格遵守)\\n")
-	sb.WriteString("**必须使用XML标签 <reasoning> 和 <decision> 标签分隔思维链和决策JSON**\\n\\n")
-	sb.WriteString("在 <decision> 中输出严格的 JSON 数组，每个元素代表一个交易决策。字段名必须与下面示例完全一致：symbol, action, leverage, position_size_usd, stop_loss, take_profit, confidence, risk_usd, invalidation_condition, reasoning。\\n\\n")
-	sb.WriteString("特别说明：\\n")
-	sb.WriteString("- 当 action = 'update_stop_loss' 时，请只填写 `symbol`, `action`, `new_stop_loss`, `confidence`, `reasoning`，不要再使用 `stop_loss` 字段。\\n")
-	sb.WriteString("- 当 action = 'update_take_profit' 时，请只填写 `symbol`, `action`, `new_take_profit`, `confidence`, `reasoning`。\\n")
-	sb.WriteString("- 当 action = 'hold' 或 'wait' 时，不要填写价格/仓位字段（如 stop_loss/position_size_usd），只需给出 `symbol`(如适用)、`action`、`confidence`, `reasoning`。\\n\\n")
-	sb.WriteString("<reasoning>\\n你的分析过程...\\n</reasoning>\\n\\n")
-	sb.WriteString("<decision>\\n```json\\n[\\n")
-	sb.WriteString("  {\"symbol\": \"BTCUSDT\", \"action\": \"open_long\", \"leverage\": 5, \"position_size_usd\": 1000, \"stop_loss\": 90000, \"take_profit\": 95000, \"confidence\": 85, \"risk_usd\": 50, \"invalidation_condition\": \"RSI drops below 30\", \"reasoning\": \"...\"}\\n")
-	sb.WriteString("]\\n```\\n</decision>\\n")
+	// 3. 追加当前策略信息和风控参数（动态生成）
+	sb.WriteString("\n# 当前策略配置\n")
+	sb.WriteString(fmt.Sprintf("策略名称: %s (%s)\n\n", strategyName, strategyDesc))
+	
+	sb.WriteString("## 风控参数（由后端强制执行）\n")
+	sb.WriteString(fmt.Sprintf("- **固定杠杆**: %dx（你不能通过改变杠杆来控制风险，只能通过仓位大小和止损位置）\n", riskCfg.FixedLeverage))
+	sb.WriteString(fmt.Sprintf("- **单笔最大风险**: %.0f%% 账户净值\n", riskCfg.MaxRiskPerTrade*100))
+	sb.WriteString(fmt.Sprintf("- **总风险上限**: %.0f%% 账户净值（一轮内所有新开仓合计）\n", riskCfg.MaxTotalRisk*100))
+	sb.WriteString(fmt.Sprintf("- **最小风险回报比**: %.1f:1\n", riskCfg.MinRiskRewardRatio))
+	sb.WriteString(fmt.Sprintf("- **最大保证金使用率**: %.0f%%\n", riskCfg.MaxMarginUsage*100))
+	sb.WriteString(fmt.Sprintf("- **止损 ATR 倍数参考**: %.1fx\n", riskCfg.StopLossATRMultiple))
+	
+	// 根据策略类型添加特定指导
+	sb.WriteString("\n## 策略指导\n")
+	switch strategyName {
+	case "aggressive":
+		sb.WriteString("- 当前为激进模式：追求高收益，接受较高风险\n")
+		sb.WriteString("- 可以在趋势明确时重仓进攻，但必须严格执行止损\n")
+		sb.WriteString("- 优先寻找突破和趋势延续机会\n")
+	case "conservative":
+		sb.WriteString("- 当前为保守模式：追求稳定收益，严格控制风险\n")
+		sb.WriteString("- 只在高确定性机会入场，宁可错过也不要错进\n")
+		sb.WriteString("- 优先寻找回调到支撑/阻力位的低风险入场点\n")
+	case "scalping":
+		sb.WriteString("- 当前为剥头皮模式：超短线快进快出\n")
+		sb.WriteString("- 小仓位多次尝试，快速止盈止损\n")
+		sb.WriteString("- 关注 5m/15m 级别的微观结构和成交量异动\n")
+	default: // balanced
+		sb.WriteString("- 当前为平衡模式：中等风险，稳健交易\n")
+		sb.WriteString("- 在趋势明确且风险回报足够大时重仓试错，没有高质量机会就观望\n")
+		sb.WriteString("- 主要使用 日线/4h 判断大级别趋势，4h/1h 寻找回调上车机会\n")
+	}
 
 	return sb.String()
 }
@@ -186,9 +196,6 @@ func buildUserPrompt(ctx *Context) string {
 		ctx.Account.MarginUsedPct,
 		ctx.Account.PositionCount))
 	
-	// 夏普比率
-	sb.WriteString(fmt.Sprintf("📊 运行时夏普比率: %.2f\n\n", ctx.SharpeRatio))
-
 	// 板块热度 (新增)
 	if len(ctx.Sectors) > 0 {
 		sb.WriteString("## Sector Heatmap (1h/4h Change)\n")

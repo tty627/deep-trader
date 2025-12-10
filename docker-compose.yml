@@ -1,0 +1,53 @@
+services:
+  deep_trader:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: deep_trader
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    environment:
+      # AI Configuration
+      - AI_API_KEY=${AI_API_KEY:-}
+      - AI_API_URL=${AI_API_URL:-https://api.deepseek.com/v1/chat/completions}
+      - AI_MODEL=${AI_MODEL:-deepseek-chat}
+      - AI_LOOP_INTERVAL_SECONDS=${AI_LOOP_INTERVAL_SECONDS:-150}
+      
+      # Binance Configuration (optional - leave empty for simulation mode)
+      - BINANCE_API_KEY=${BINANCE_API_KEY:-}
+      - BINANCE_SECRET_KEY=${BINANCE_SECRET_KEY:-}
+      - BINANCE_PROXY_URL=${BINANCE_PROXY_URL:-}
+      
+      # Notification Configuration (optional)
+      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN:-}
+      - TELEGRAM_CHAT_ID=${TELEGRAM_CHAT_ID:-}
+      - DISCORD_WEBHOOK_URL=${DISCORD_WEBHOOK_URL:-}
+      
+      # Timezone
+      - TZ=Asia/Shanghai
+    volumes:
+      # Persist database and exports
+      - deep_trader_data:/app/data
+      - ./exports:/app/exports
+      - ./backtest_data:/app/backtest_data
+      - ./backtest_reports:/app/backtest_reports
+      - ./strategies:/app/strategies
+      
+      # Mount config file (optional - can also use env vars)
+      - ./config.local.json:/app/config.local.json:ro
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8080/api/state"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+volumes:
+  deep_trader_data:
+    driver: local

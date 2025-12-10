@@ -30,6 +30,19 @@ type Config struct {
     BinanceAPIKey    string `json:"binance_api_key"`
     BinanceSecretKey string `json:"binance_secret_key"`
     BinanceProxyURL  string `json:"binance_proxy_url"`
+
+    // 通知配置
+    Notifications NotificationConfig `json:"notifications"`
+
+    // 多 AI 模型配置
+    AIModels []AIModelConfig `json:"ai_models"`
+    AIMode   string          `json:"ai_mode"` // "primary" | "vote" | "compare"
+
+    // 策略配置
+    ActiveStrategy string `json:"active_strategy"`
+
+    // 数据库路径
+    DatabasePath string `json:"database_path"`
 }
 
 // LoadConfig 先尝试从 config.local.json 读取；如果没有该文件，则退回到环境变量

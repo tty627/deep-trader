@@ -6,37 +6,52 @@ import (
 	"math"
 )
 
-// 全局风控常量
+// 全局风控常量（不随策略变化的部分）
 const (
 	// 建议的单笔最小名义仓位，用于避免交易所最小名义限制（约 10U）带来的报错
 	minPositionSizeGeneral = 12.0
 
-
 	// 预留 12% 安全边际，和 prompt 中的说明保持一致
 	safetyReserveFactor = 0.88
 
-	// 单笔最大风险（占账户净值的比例），用于高杠杆日内模式
-	// 中度激进：单笔最多亏损约 3% 净值
-	maxRiskPctPerTrade = 0.03 // 3%
+	// Altcoin 专属单笔风险硬上限（USDT），避免山寨仓位风险与 BTC/ETH 等权。
+	maxRiskUsdAltPerTrade = 12.0 // 单笔 Altcoin 理论最大亏损建议控制在 ~10–12U
 
-	// 单笔交易最多使用可用余额的多少作为保证金，避免一次性 All‑in
-	maxMarginUsagePerTrade = 0.3 // 30%
+	// Altcoin 单笔保证金占用更保守，避免与主流币同级别爆仓风险
+	maxAltMarginUsagePerTrade = 0.40 // 40%
 
-	// 固定杠杆模式：所有开仓统一使用 10x 杠杆，由仓位大小和止损控制真实风险
-	fixedLeverage = 10
+	// 绝对金额上的单笔风险硬上限（USDT），用于实现近似固定 risk_usd 风格
+	// 例如在 ~100U 账户下，A+ 机会单笔允许亏损约 40–50U
+	maxRiskUsdHardPerTrade = 50.0
 
 	// 动态移动止损时，要求止损与当前价格之间保留的最小缓冲
-	// 由于循环周期是 2 分钟，如果止损离当前价过近，会被噪音频繁扫损
-	// 原先的绝对下限是 0.15%，在 ETH 这类品种上的体感略偏紧，容易出现“刚想上移止损就被 1 根 K 线扫掉”的情况
-	// 这里适度降低为 0.12%，并将 ATR 缓冲从 50% 降低到 20%，让追踪止损更灵活
-	minStopDistancePctFloor  = 0.12 // 至少 0.12%
-	minStopDistanceATRFactor = 0.20 // 至少保留约 20% 的 5m ATR 作为缓冲
+	// 在保持高杠杆抗噪性的前提下略微放松：允许止损靠近一些，以便更积极锁定利润
+	minStopDistancePctFloor  = 0.18 // 至少 0.18%
+	minStopDistanceATRFactor = 0.35 // 至少保留约 35% 的 5m ATR 作为缓冲
 )
 
+// getRiskConfig 获取当前策略的风险配置，包含动态参数
+func getRiskConfig() RiskConfig {
+	sm := GetStrategyManager()
+	if sm != nil {
+		return sm.GetRiskConfig()
+	}
+	// 回退到默认配置
+	return RiskConfig{
+		MaxRiskPerTrade:     0.25,
+		MaxTotalRisk:        0.40,
+		MinRiskRewardRatio:  2.0,
+		FixedLeverage:       15,
+		MaxMarginUsage:      0.70,
+		StopLossATRMultiple: 1.8,
+	}
+}
+
 // ValidateDecisions 验证所有决策
-func ValidateDecisions(decisions []Decision, account AccountInfo, btcEthLeverage, altcoinLeverage int, mdMap map[string]*MarketData) error {
+func ValidateDecisions(decisions []Decision, account AccountInfo, mdMap map[string]*MarketData) error {
+	var totalRiskPct float64
 	for i := range decisions {
-		if err := validateDecision(&decisions[i], account, btcEthLeverage, altcoinLeverage, mdMap); err != nil {
+		if err := validateDecision(&decisions[i], account, mdMap, &totalRiskPct); err != nil {
 			return fmt.Errorf("决策 #%d 验证失败: %w", i+1, err)
 		}
 	}
@@ -44,9 +59,22 @@ func ValidateDecisions(decisions []Decision, account AccountInfo, btcEthLeverage
 }
 
 // validateDecision 验证单个决策的有效性
-func validateDecision(d *Decision, account AccountInfo, btcEthLeverage, altcoinLeverage int, mdMap map[string]*MarketData) error {
+func validateDecision(d *Decision, account AccountInfo, mdMap map[string]*MarketData, totalRiskPct *float64) error {
 	accountEquity := account.TotalEquity
 	available := account.AvailableBalance
+
+	// 兼容模型可能输出的少量别名 / 不支持的 action，做宽松处理
+	switch d.Action {
+	case "increase_position":
+		// 将 increase_position 视为在当前方向上追加仓位，这里统一按 open_long 处理
+		// （当前策略几乎只做多，如需做空加仓应在 prompt 中明确使用 open_short）
+		log.Printf("⚠️ [Action Fallback] %s 使用未支持的 action increase_position，自动按 open_long 处理", d.Symbol)
+		d.Action = "open_long"
+	case "limit_order", "limit_long", "limit_short":
+		// 暂不支持真实挂限价单，避免与当前市价执行逻辑冲突：直接忽略为观望
+		log.Printf("⚠️ [Action Reject] %s 使用未支持的限价类 action=%s，已忽略（视为 wait）", d.Symbol, d.Action)
+		d.Action = "wait"
+	}
 
 	// 验证action
 	validActions := map[string]bool{
@@ -62,24 +90,32 @@ func validateDecision(d *Decision, account AccountInfo, btcEthLeverage, altcoinL
 	}
 
 	if !validActions[d.Action] {
-		return fmt.Errorf("无效的action: %s", d.Action)
+		// 不再让单个未知 action 让整批决策失败：记录日志并将其视为观望
+		log.Printf("⚠️ [Action Reject] %s 不支持的action=%s，已自动忽略（视为 wait）", d.Symbol, d.Action)
+		d.Action = "wait"
+		return nil
 	}
 
 	// 开仓操作必须提供完整参数
 	if d.Action == "open_long" || d.Action == "open_short" {
+		// 判断是否为 Altcoin（非 BTC/ETH），用于后续专属风险控制
+		isAlt := d.Symbol != "BTCUSDT" && d.Symbol != "ETHUSDT"
 		if accountEquity <= 0 {
 			return fmt.Errorf("账户净值为0，无法进行开仓验证")
 		}
 
-		// 固定杠杆模式：所有币种统一使用 20x，由 fixedLeverage 控制
-		maxLeverage := fixedLeverage
+		// 从当前策略获取风险配置
+		riskCfg := getRiskConfig()
+		
+		// 固定杠杆模式：所有币种统一使用策略配置的杠杆
+		maxLeverage := riskCfg.FixedLeverage
 		if maxLeverage <= 0 {
-			return fmt.Errorf("无效的固定杠杆配置: %d", maxLeverage)
+			maxLeverage = 15 // 安全默认值
 		}
 
-		// 无论模型给出多少杠杆，这里都强制覆盖为 fixedLeverage，确保实盘和风控一致
+		// 无论模型给出多少杠杆，这里都强制覆盖为策略配置的杠杆，确保实盘和风控一致
 		if d.Leverage != maxLeverage {
-			log.Printf("⚠️ [Leverage Force] %s 强制使用固定杠杆 %dx (模型提出 %dx 已被覆盖)", d.Symbol, maxLeverage, d.Leverage)
+			log.Printf("⚠️ [Leverage Force] %s 强制使用策略杠杆 %dx (模型提出 %dx 已被覆盖)", d.Symbol, maxLeverage, d.Leverage)
 			d.Leverage = maxLeverage
 		}
 
@@ -128,11 +164,14 @@ func validateDecision(d *Decision, account AccountInfo, btcEthLeverage, altcoinL
 			d.PositionSizeUSD = capped
 		}
 
-		// 再按单笔最大保证金占用控制，避免一次性吃掉全部可用余额
-		if available > 0 {
-			marginRequired := d.PositionSizeUSD / float64(d.Leverage)
-			maxMarginPerTrade := available * maxMarginUsagePerTrade * safetyReserveFactor
-			if marginRequired > maxMarginPerTrade {
+			// 再按单笔最大保证金占用控制，避免一次性吃掉全部可用余额
+			if available > 0 {
+				marginRequired := d.PositionSizeUSD / float64(d.Leverage)
+				maxMarginPerTrade := available * riskCfg.MaxMarginUsage * safetyReserveFactor
+				if isAlt {
+					maxMarginPerTrade = available * maxAltMarginUsagePerTrade * safetyReserveFactor
+				}
+				if marginRequired > maxMarginPerTrade {
 				if maxMarginPerTrade <= 0 {
 					return fmt.Errorf("账户可用保证金不足以支撑该仓位: 需要 %.2f, 可用 %.2f", marginRequired, available)
 				}
@@ -202,25 +241,66 @@ func validateDecision(d *Decision, account AccountInfo, btcEthLeverage, altcoinL
 			}
 			estimatedRiskUsd = d.PositionSizeUSD * math.Abs(riskPercent) / 100.0
 			riskPctOfEquity = estimatedRiskUsd / accountEquity
-			maxRiskUsd := accountEquity * maxRiskPctPerTrade
+
+			// 单笔风险上限：既限制百分比，也限制绝对金额（近似固定 risk_usd 风格）
+			maxRiskUsdByPct := accountEquity * riskCfg.MaxRiskPerTrade
+			maxRiskUsd := maxRiskUsdByPct
+			if maxRiskUsdHardPerTrade > 0 && maxRiskUsd > maxRiskUsdHardPerTrade {
+				maxRiskUsd = maxRiskUsdHardPerTrade
+			}
+
 			if maxRiskUsd > 0 && estimatedRiskUsd > maxRiskUsd {
 				// 自动缩小仓位以符合单笔风险上限
 				newPos := maxRiskUsd * 100.0 / math.Abs(riskPercent)
-				log.Printf("⚠️ [Risk Fallback] %s 单笔风险 %.2f USDT 超过上限 %.2f，自动缩小仓位到 %.2f USDT",
+				log.Printf("⚠️ [Risk Fallback] %s 单笔风险 %.2f USDT 超过单笔上限 %.2f，自动缩小仓位到 %.2f USDT",
 					d.Symbol, estimatedRiskUsd, maxRiskUsd, newPos)
 				d.PositionSizeUSD = newPos
 				// 更新缩仓后的风险估算
 				estimatedRiskUsd = maxRiskUsd
 				riskPctOfEquity = estimatedRiskUsd / accountEquity
 			}
+
+			// Altcoin 进一步收紧单笔风险上限，使其更偏向“小仓战术单”而非主仓
+			if isAlt && maxRiskUsdAltPerTrade > 0 && estimatedRiskUsd > maxRiskUsdAltPerTrade {
+				newPos := maxRiskUsdAltPerTrade * 100.0 / math.Abs(riskPercent)
+				log.Printf("⚠️ [Alt Risk Fallback] %s Altcoin 单笔风险 %.2f USDT 超过 Alt 上限 %.2f，自动缩小仓位到 %.2f USDT",
+					d.Symbol, estimatedRiskUsd, maxRiskUsdAltPerTrade, newPos)
+				d.PositionSizeUSD = newPos
+				estimatedRiskUsd = maxRiskUsdAltPerTrade
+				riskPctOfEquity = estimatedRiskUsd / accountEquity
+			}
+		}
+
+		if totalRiskPct != nil && riskPctOfEquity > 0 {
+			currentTotal := *totalRiskPct
+			proposedTotal := currentTotal + riskPctOfEquity
+			if proposedTotal > riskCfg.MaxTotalRisk {
+				remaining := riskCfg.MaxTotalRisk - currentTotal
+				if remaining <= 0 {
+					return fmt.Errorf("所有新开仓风险之和已达到全局上限 %.2f%%，拒绝 %s", riskCfg.MaxTotalRisk*100, d.Symbol)
+				}
+				// 将本次仓位缩小到仅使用剩余风险预算
+				allowedRiskUsd := remaining * accountEquity
+				newPos := allowedRiskUsd * 100.0 / math.Abs(riskPercent)
+				log.Printf("⚠️ [Global Risk Fallback] %s 总风险将超出上限，调整本单风险从 %.2f USDT 降至 %.2f USDT，仓位从 %.2f USDT 降至 %.2f USDT",
+					d.Symbol, estimatedRiskUsd, allowedRiskUsd, d.PositionSizeUSD, newPos)
+				d.PositionSizeUSD = newPos
+				estimatedRiskUsd = allowedRiskUsd
+				riskPctOfEquity = remaining
+				proposedTotal = currentTotal + remaining
+			}
+			*totalRiskPct = proposedTotal
 		}
 
 		// 基于单笔风险占净值的大小，采用两档 RR 要求：
-		//  - 小仓试探单（风险 <= 1.5% 净值）：允许更低的 RR，下限约 0.8:1
-		//  - 正式仓位（风险 > 1.5% 净值）：要求 RR >= 1.3:1
-		probeRiskPct := 0.015  // 1.5%
-		strictMinRR := 1.3     // 从 2.0 降低到 1.3
-		probeMinRR := 0.8
+		//  - 小仓试探单（风险 <= 1.5% 净值）：允许略低的 RR，下限约 1.0:1
+		//  - 正式仓位（风险 > 策略配置的阈值）：使用策略配置的最小 RR
+		probeRiskPct := 0.015 // 1.5%
+		strictMinRR := riskCfg.MinRiskRewardRatio
+		if strictMinRR <= 0 {
+			strictMinRR = 1.8 // 安全默认值
+		}
+		probeMinRR := 1.0
 
 		// 如果无法估算风险（例如缺少价格），回退使用严格 RR
 		minRR := strictMinRR
@@ -274,7 +354,11 @@ func validateDecision(d *Decision, account AccountInfo, btcEthLeverage, altcoinL
 				}
 
 				if distPct > 0 && distPct < minPct {
-					return fmt.Errorf("新止损 %.4f 离当前价格过近(约%.2f%%)，为了避免 2 分钟周期的噪音频繁扫损，至少需要保留 ≥ %.2f%% 的价格缓冲", d.NewStopLoss, distPct, minPct)
+					// 不再视为硬错误，而是记录信息并将本次止损调整视为 no-op，避免打断整批决策执行。
+					log.Printf("ℹ️ [SL Noop] %s 新止损 %.4f 距当前价约 %.2f%% (< 最小缓冲 %.2f%%)，为避免 2 分钟周期噪音频繁扫损，本轮放弃调整止损，保持原止损不变", d.Symbol, d.NewStopLoss, distPct, minPct)
+					// 将本次动作视为 hold，后续执行层不会真正下发 update_stop_loss 指令。
+					d.Action = "hold"
+					return nil
 				}
 			}
 		}
@@ -289,7 +373,14 @@ func validateDecision(d *Decision, account AccountInfo, btcEthLeverage, altcoinL
 
 	// 部分平仓验证
 	if d.Action == "partial_close" {
-		if d.ClosePercentage <= 0 || d.ClosePercentage > 100 {
+		// 部分平仓本质上是减仓行为，不增加风险，这里只做参数合法性校验
+		// 优先使用 close_percentage；若缺失但给出了 position_size_usd，则允许执行层按金额推导比例
+		if d.ClosePercentage > 0 && d.ClosePercentage <= 100 {
+			// 正常按百分比部分平仓
+		} else if d.ClosePercentage <= 0 && d.PositionSizeUSD > 0 {
+			// 仅提供了按金额部分平仓的信息：在 ExecuteDecision 阶段根据当前持仓名义价值推导百分比
+			log.Printf("⚠️ [Partial Fallback] %s partial_close 未提供 close_percentage，仅提供 position_size_usd=%.2f，将在执行层按金额推导比例", d.Symbol, d.PositionSizeUSD)
+		} else {
 			return fmt.Errorf("平仓百分比必须在0-100之间: %.1f", d.ClosePercentage)
 		}
 	}

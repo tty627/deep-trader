@@ -6,6 +6,7 @@
     <title>Simple AI Trader</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&family=Inter:wght@300;400;600;700&display=swap" rel="stylesheet">
     <script>
         tailwind.config = {
@@ -122,6 +123,14 @@
                     <button class="flex items-center gap-2 bg-slate-800/50 text-slate-400 px-3 py-2 rounded-lg text-sm font-medium border border-slate-700/50 cursor-default">
                         <span class="hidden sm:inline">v2.0 Dashboard</span>
                     </button>
+                    <!-- Settings Button -->
+                    <button @click="showSettingsModal = true" class="flex items-center gap-2 bg-fuchsia-600/20 text-fuchsia-300 px-3 py-2 rounded-lg text-sm font-medium border border-fuchsia-500/50 hover:bg-fuchsia-600/30 transition-colors">
+                        <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                        </svg>
+                        <span class="hidden sm:inline">设置</span>
+                    </button>
                 </div>
             </div>
         </nav>
@@ -186,6 +195,58 @@
                 </div>
             </div>
             <div v-else class="h-24 bg-slate-900/50 rounded-xl animate-pulse"></div>
+
+            <!-- Equity Chart -->
+            <div class="dashboard-card p-4">
+                <div class="flex items-center justify-between mb-4">
+                    <h3 class="text-sm font-semibold text-slate-300 flex items-center gap-2">
+                        <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 text-fuchsia-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 12l3-3 3 3 4-4M8 21l4-4 4 4M3 4h18M4 4h16v12a1 1 0 01-1 1H5a1 1 0 01-1-1V4z" />
+                        </svg>
+                        账户资产变化
+                    </h3>
+                    <div class="flex gap-2">
+                        <button @click="chartTimeRange = '1h'" 
+                            :class="chartTimeRange === '1h' ? 'bg-fuchsia-600/30 text-fuchsia-300 border-fuchsia-500' : 'bg-slate-800/50 text-slate-400 border-slate-700'"
+                            class="px-2 py-1 text-xs rounded border transition-colors">1H</button>
+                        <button @click="chartTimeRange = '6h'" 
+                            :class="chartTimeRange === '6h' ? 'bg-fuchsia-600/30 text-fuchsia-300 border-fuchsia-500' : 'bg-slate-800/50 text-slate-400 border-slate-700'"
+                            class="px-2 py-1 text-xs rounded border transition-colors">6H</button>
+                        <button @click="chartTimeRange = '24h'" 
+                            :class="chartTimeRange === '24h' ? 'bg-fuchsia-600/30 text-fuchsia-300 border-fuchsia-500' : 'bg-slate-800/50 text-slate-400 border-slate-700'"
+                            class="px-2 py-1 text-xs rounded border transition-colors">24H</button>
+                        <button @click="chartTimeRange = 'all'" 
+                            :class="chartTimeRange === 'all' ? 'bg-fuchsia-600/30 text-fuchsia-300 border-fuchsia-500' : 'bg-slate-800/50 text-slate-400 border-slate-700'"
+                            class="px-2 py-1 text-xs rounded border transition-colors">ALL</button>
+                    </div>
+                </div>
+                <div class="relative h-64">
+                    <canvas ref="equityChartRef"></canvas>
+                    <div v-if="equityHistory.length === 0" class="absolute inset-0 flex items-center justify-center text-slate-500 text-sm">
+                        暂无数据，运行后将自动记录
+                    </div>
+                </div>
+                <div v-if="equityHistory.length > 0" class="mt-3 grid grid-cols-2 md:grid-cols-4 gap-3 text-center">
+                    <div class="bg-slate-900/50 rounded-lg p-2">
+                        <div class="text-xs text-slate-500">起始净值</div>
+                        <div class="text-sm font-mono text-slate-300">${{ formatMoney(chartStats.startEquity) }}</div>
+                    </div>
+                    <div class="bg-slate-900/50 rounded-lg p-2">
+                        <div class="text-xs text-slate-500">当前净值</div>
+                        <div class="text-sm font-mono text-slate-300">${{ formatMoney(chartStats.endEquity) }}</div>
+                    </div>
+                    <div class="bg-slate-900/50 rounded-lg p-2">
+                        <div class="text-xs text-slate-500">区间收益</div>
+                        <div class="text-sm font-mono" :class="chartStats.change >= 0 ? 'text-emerald-400' : 'text-rose-400'">
+                            {{ chartStats.change >= 0 ? '+' : '' }}{{ formatMoney(chartStats.change) }} ({{ chartStats.changePct >= 0 ? '+' : '' }}{{ chartStats.changePct.toFixed(2) }}%)
+                        </div>
+                    </div>
+                    <div class="bg-slate-900/50 rounded-lg p-2">
+                        <div class="text-xs text-slate-500">最高 / 最低</div>
+                        <div class="text-sm font-mono text-slate-300">${{ formatMoney(chartStats.high) }} / ${{ formatMoney(chartStats.low) }}</div>
+                    </div>
+                </div>
+            </div>
 
             <!-- Market Ticker -->
             <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-3">
@@ -543,6 +604,167 @@
 
                 </div>
             </div>
+
+            <!-- Settings Modal -->
+            <transition name="fade">
+                <div v-if="showSettingsModal" class="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm modal-backdrop flex items-center justify-center px-4" @click="showSettingsModal = false">
+                    <div class="bg-slate-900 border border-slate-700 rounded-xl max-w-2xl w-full max-h-[85vh] overflow-hidden shadow-2xl" @click.stop>
+                        <div class="px-5 py-4 border-b border-slate-700 flex items-center justify-between bg-slate-950/80">
+                            <h3 class="text-lg font-semibold text-white">⚙️ 设置面板</h3>
+                            <button @click="showSettingsModal = false" class="text-slate-400 hover:text-white p-1 rounded hover:bg-slate-800">
+                                <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+                                </svg>
+                            </button>
+                        </div>
+                        <div class="p-5 space-y-6 overflow-y-auto max-h-[70vh]">
+                            
+                            <!-- Strategy Section -->
+                            <div class="bg-slate-800/50 rounded-lg p-4 border border-slate-700">
+                                <h4 class="text-sm font-semibold text-fuchsia-300 mb-3 flex items-center gap-2">
+                                    <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
+                                    </svg>
+                                    策略选择
+                                </h4>
+                                <div class="grid grid-cols-2 gap-3">
+                                    <button v-for="strat in strategies" :key="strat.name"
+                                        @click="switchStrategy(strat.name)"
+                                        class="p-3 rounded-lg border text-left transition-all"
+                                        :class="activeStrategy === strat.name 
+                                            ? 'border-fuchsia-500 bg-fuchsia-500/20 text-white' 
+                                            : 'border-slate-600 bg-slate-900/50 text-slate-300 hover:border-slate-500 hover:bg-slate-800'">
+                                        <div class="font-semibold text-sm">{{ strat.display_name || strat.name }}</div>
+                                        <div class="text-xs text-slate-400 mt-1">{{ strat.description }}</div>
+                                    </button>
+                                </div>
+                                <div v-if="strategyMessage" class="mt-3 text-xs" :class="strategyError ? 'text-rose-400' : 'text-emerald-400'">
+                                    {{ strategyMessage }}
+                                </div>
+                            </div>
+
+                            <!-- Active Strategy Parameters -->
+                            <div v-if="activeStrategyParams" class="bg-slate-800/50 rounded-lg p-4 border border-slate-700">
+                                <h4 class="text-sm font-semibold text-cyan-300 mb-3 flex items-center gap-2">
+                                    <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                                    </svg>
+                                    当前策略参数
+                                </h4>
+                                <div class="grid grid-cols-2 md:grid-cols-3 gap-3">
+                                    <!-- 杠杆 -->
+                                    <div class="bg-slate-900/60 rounded-lg p-3 border border-slate-700/50">
+                                        <div class="text-[10px] uppercase text-slate-500 font-semibold mb-1">杠杆倍数</div>
+                                        <div class="text-lg font-bold text-amber-400">{{ activeStrategyParams.fixed_leverage }}x</div>
+                                        <div class="w-full bg-slate-700/50 rounded-full h-1.5 mt-2">
+                                            <div class="bg-amber-500 h-1.5 rounded-full transition-all duration-500" :style="{width: Math.min(activeStrategyParams.fixed_leverage / 50 * 100, 100) + '%'}"></div>
+                                        </div>
+                                    </div>
+                                    <!-- 单笔风险 -->
+                                    <div class="bg-slate-900/60 rounded-lg p-3 border border-slate-700/50">
+                                        <div class="text-[10px] uppercase text-slate-500 font-semibold mb-1">单笔最大风险</div>
+                                        <div class="text-lg font-bold text-rose-400">{{ (activeStrategyParams.max_risk_per_trade * 100).toFixed(0) }}%</div>
+                                        <div class="w-full bg-slate-700/50 rounded-full h-1.5 mt-2">
+                                            <div class="bg-rose-500 h-1.5 rounded-full transition-all duration-500" :style="{width: activeStrategyParams.max_risk_per_trade * 100 + '%'}"></div>
+                                        </div>
+                                    </div>
+                                    <!-- 总风险 -->
+                                    <div class="bg-slate-900/60 rounded-lg p-3 border border-slate-700/50">
+                                        <div class="text-[10px] uppercase text-slate-500 font-semibold mb-1">总风险上限</div>
+                                        <div class="text-lg font-bold text-orange-400">{{ (activeStrategyParams.max_total_risk * 100).toFixed(0) }}%</div>
+                                        <div class="w-full bg-slate-700/50 rounded-full h-1.5 mt-2">
+                                            <div class="bg-orange-500 h-1.5 rounded-full transition-all duration-500" :style="{width: activeStrategyParams.max_total_risk * 100 + '%'}"></div>
+                                        </div>
+                                    </div>
+                                    <!-- 保证金使用率 -->
+                                    <div class="bg-slate-900/60 rounded-lg p-3 border border-slate-700/50">
+                                        <div class="text-[10px] uppercase text-slate-500 font-semibold mb-1">最大保证金使用</div>
+                                        <div class="text-lg font-bold text-blue-400">{{ (activeStrategyParams.max_margin_usage * 100).toFixed(0) }}%</div>
+                                        <div class="w-full bg-slate-700/50 rounded-full h-1.5 mt-2">
+                                            <div class="bg-blue-500 h-1.5 rounded-full transition-all duration-500" :style="{width: activeStrategyParams.max_margin_usage * 100 + '%'}"></div>
+                                        </div>
+                                    </div>
+                                    <!-- 盈亏比 -->
+                                    <div class="bg-slate-900/60 rounded-lg p-3 border border-slate-700/50">
+                                        <div class="text-[10px] uppercase text-slate-500 font-semibold mb-1">最小盈亏比</div>
+                                        <div class="text-lg font-bold text-emerald-400">1:{{ activeStrategyParams.min_risk_reward_ratio }}</div>
+                                        <div class="w-full bg-slate-700/50 rounded-full h-1.5 mt-2">
+                                            <div class="bg-emerald-500 h-1.5 rounded-full transition-all duration-500" :style="{width: Math.min(activeStrategyParams.min_risk_reward_ratio / 3 * 100, 100) + '%'}"></div>
+                                        </div>
+                                    </div>
+                                    <!-- 止损ATR倍数 -->
+                                    <div class="bg-slate-900/60 rounded-lg p-3 border border-slate-700/50">
+                                        <div class="text-[10px] uppercase text-slate-500 font-semibold mb-1">止损ATR倍数</div>
+                                        <div class="text-lg font-bold text-purple-400">{{ activeStrategyParams.stop_loss_atr_multiple }}x ATR</div>
+                                        <div class="w-full bg-slate-700/50 rounded-full h-1.5 mt-2">
+                                            <div class="bg-purple-500 h-1.5 rounded-full transition-all duration-500" :style="{width: Math.min(activeStrategyParams.stop_loss_atr_multiple / 3 * 100, 100) + '%'}"></div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Data Export Section -->
+                            <div class="bg-slate-800/50 rounded-lg p-4 border border-slate-700">
+                                <h4 class="text-sm font-semibold text-fuchsia-300 mb-3 flex items-center gap-2">
+                                    <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                                    </svg>
+                                    数据导出
+                                </h4>
+                                <div class="flex flex-wrap gap-3">
+                                    <button @click="exportData('equity', 'csv')" class="px-4 py-2 bg-emerald-600/20 text-emerald-300 rounded-lg text-sm font-medium border border-emerald-500/50 hover:bg-emerald-600/30 transition-colors">
+                                        📊 导出净值 (CSV)
+                                    </button>
+                                    <button @click="exportData('equity', 'json')" class="px-4 py-2 bg-blue-600/20 text-blue-300 rounded-lg text-sm font-medium border border-blue-500/50 hover:bg-blue-600/30 transition-colors">
+                                        📊 导出净值 (JSON)
+                                    </button>
+                                    <button @click="exportData('trades', 'csv')" class="px-4 py-2 bg-purple-600/20 text-purple-300 rounded-lg text-sm font-medium border border-purple-500/50 hover:bg-purple-600/30 transition-colors">
+                                        📈 导出交易 (CSV)
+                                    </button>
+                                    <button @click="exportData('trades', 'json')" class="px-4 py-2 bg-orange-600/20 text-orange-300 rounded-lg text-sm font-medium border border-orange-500/50 hover:bg-orange-600/30 transition-colors">
+                                        📈 导出交易 (JSON)
+                                    </button>
+                                </div>
+                                <div v-if="exportMessage" class="mt-3 text-xs" :class="exportError ? 'text-rose-400' : 'text-emerald-400'">
+                                    {{ exportMessage }}
+                                </div>
+                            </div>
+
+                            <!-- Trade Stats Section -->
+                            <div class="bg-slate-800/50 rounded-lg p-4 border border-slate-700">
+                                <h4 class="text-sm font-semibold text-fuchsia-300 mb-3 flex items-center gap-2">
+                                    <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
+                                    </svg>
+                                    交易统计
+                                </h4>
+                                <div v-if="tradeStats" class="grid grid-cols-2 md:grid-cols-4 gap-4 text-center">
+                                    <div class="bg-slate-900/50 rounded-lg p-3">
+                                        <div class="text-xl font-bold text-white">{{ tradeStats.total_trades || 0 }}</div>
+                                        <div class="text-xs text-slate-400">总交易数</div>
+                                    </div>
+                                    <div class="bg-slate-900/50 rounded-lg p-3">
+                                        <div class="text-xl font-bold" :class="(tradeStats.win_rate || 0) >= 50 ? 'text-emerald-400' : 'text-rose-400'">{{ (tradeStats.win_rate || 0).toFixed(1) }}%</div>
+                                        <div class="text-xs text-slate-400">胜率</div>
+                                    </div>
+                                    <div class="bg-slate-900/50 rounded-lg p-3">
+                                        <div class="text-xl font-bold" :class="(tradeStats.total_pnl || 0) >= 0 ? 'text-emerald-400' : 'text-rose-400'">${{ formatMoney(tradeStats.total_pnl || 0) }}</div>
+                                        <div class="text-xs text-slate-400">总盈亏</div>
+                                    </div>
+                                    <div class="bg-slate-900/50 rounded-lg p-3">
+                                        <div class="text-xl font-bold text-blue-400">${{ formatMoney(tradeStats.avg_pnl || 0) }}</div>
+                                        <div class="text-xs text-slate-400">平均盈亏</div>
+                                    </div>
+                                </div>
+                                <div v-else class="text-center text-slate-500 py-4">加载中...</div>
+                            </div>
+
+                        </div>
+                    </div>
+                </div>
+            </transition>
+
         </main>
     </div>
 
@@ -566,6 +788,23 @@
                 const tradeHistory = ref([]); // 新增：历史交易记录
                 const selectedHistoryItem = ref(null);
                 const currentTime = ref('');
+                
+                // Settings modal
+                const showSettingsModal = ref(false);
+                const strategies = ref([]);
+                const activeStrategy = ref('balanced');
+                const activeStrategyParams = ref(null);
+                const strategyMessage = ref('');
+                const strategyError = ref(false);
+                const tradeStats = ref(null);
+                const exportMessage = ref('');
+                const exportError = ref(false);
+                
+                // Equity chart
+                const equityChartRef = ref(null);
+                const equityHistory = ref([]);
+                const chartTimeRange = ref('24h');
+                let equityChart = null;
 
                 const tabs = [
                     { id: 'reasoning', name: '🧠 推理过程' },
@@ -650,13 +889,183 @@
                     selectedHistoryItem.value = null;
                 };
 
+                // 获取净值历史
+                const fetchEquityHistory = async () => {
+                    try {
+                        const res = await fetch('/api/equity_history?limit=1000');
+                        const data = await res.json();
+                        if (Array.isArray(data)) {
+                            equityHistory.value = data;
+                            updateEquityChart();
+                        }
+                    } catch (e) {
+                        console.error("Fetch equity history error", e);
+                    }
+                };
+
+                // 根据时间范围筛选数据
+                const getFilteredEquityData = () => {
+                    if (equityHistory.value.length === 0) return [];
+                    
+                    const now = new Date();
+                    let cutoff = new Date(0); // 默认显示全部
+                    
+                    switch (chartTimeRange.value) {
+                        case '1h':
+                            cutoff = new Date(now.getTime() - 60 * 60 * 1000);
+                            break;
+                        case '6h':
+                            cutoff = new Date(now.getTime() - 6 * 60 * 60 * 1000);
+                            break;
+                        case '24h':
+                            cutoff = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+                            break;
+                        case 'all':
+                        default:
+                            return equityHistory.value;
+                    }
+                    
+                    return equityHistory.value.filter(d => new Date(d.timestamp) >= cutoff);
+                };
+
+                // 图表统计数据
+                const chartStats = computed(() => {
+                    const data = getFilteredEquityData();
+                    if (data.length === 0) {
+                        return { startEquity: 0, endEquity: 0, change: 0, changePct: 0, high: 0, low: 0 };
+                    }
+                    
+                    const equities = data.map(d => d.equity);
+                    const startEquity = equities[0];
+                    const endEquity = equities[equities.length - 1];
+                    const change = endEquity - startEquity;
+                    const changePct = startEquity > 0 ? (change / startEquity) * 100 : 0;
+                    const high = Math.max(...equities);
+                    const low = Math.min(...equities);
+                    
+                    return { startEquity, endEquity, change, changePct, high, low };
+                });
+
+                // 更新图表
+                const updateEquityChart = () => {
+                    if (!equityChartRef.value) return;
+                    
+                    const data = getFilteredEquityData();
+                    if (data.length === 0) {
+                        if (equityChart) {
+                            equityChart.data.labels = [];
+                            equityChart.data.datasets[0].data = [];
+                            equityChart.update('none');
+                        }
+                        return;
+                    }
+                    
+                    const labels = data.map(d => {
+                        const date = new Date(d.timestamp);
+                        if (chartTimeRange.value === '1h' || chartTimeRange.value === '6h') {
+                            return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+                        }
+                        return date.toLocaleString([], { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+                    });
+                    const values = data.map(d => d.equity);
+                    
+                    // 判断趋势颜色
+                    const isPositive = values.length > 1 && values[values.length - 1] >= values[0];
+                    const lineColor = isPositive ? 'rgb(52, 211, 153)' : 'rgb(251, 113, 133)';
+                    const bgColor = isPositive ? 'rgba(52, 211, 153, 0.1)' : 'rgba(251, 113, 133, 0.1)';
+                    
+                    if (!equityChart) {
+                        const ctx = equityChartRef.value.getContext('2d');
+                        equityChart = new Chart(ctx, {
+                            type: 'line',
+                            data: {
+                                labels: labels,
+                                datasets: [{
+                                    label: '账户净值',
+                                    data: values,
+                                    borderColor: lineColor,
+                                    backgroundColor: bgColor,
+                                    borderWidth: 2,
+                                    fill: true,
+                                    tension: 0.3,
+                                    pointRadius: 0,
+                                    pointHoverRadius: 4,
+                                    pointHoverBackgroundColor: lineColor,
+                                }]
+                            },
+                            options: {
+                                responsive: true,
+                                maintainAspectRatio: false,
+                                interaction: {
+                                    intersect: false,
+                                    mode: 'index'
+                                },
+                                plugins: {
+                                    legend: { display: false },
+                                    tooltip: {
+                                        backgroundColor: 'rgba(15, 23, 42, 0.95)',
+                                        titleColor: '#e2e8f0',
+                                        bodyColor: '#e2e8f0',
+                                        borderColor: 'rgba(148, 163, 184, 0.2)',
+                                        borderWidth: 1,
+                                        padding: 10,
+                                        displayColors: false,
+                                        callbacks: {
+                                            label: (ctx) => `$${ctx.parsed.y.toFixed(2)}`
+                                        }
+                                    }
+                                },
+                                scales: {
+                                    x: {
+                                        display: true,
+                                        grid: { color: 'rgba(148, 163, 184, 0.1)' },
+                                        ticks: { 
+                                            color: '#64748b', 
+                                            maxTicksLimit: 8,
+                                            font: { size: 10 }
+                                        }
+                                    },
+                                    y: {
+                                        display: true,
+                                        grid: { color: 'rgba(148, 163, 184, 0.1)' },
+                                        ticks: { 
+                                            color: '#64748b',
+                                            font: { size: 10 },
+                                            callback: (val) => '$' + val.toFixed(0)
+                                        }
+                                    }
+                                }
+                            }
+                        });
+                    } else {
+                        equityChart.data.labels = labels;
+                        equityChart.data.datasets[0].data = values;
+                        equityChart.data.datasets[0].borderColor = lineColor;
+                        equityChart.data.datasets[0].backgroundColor = bgColor;
+                        equityChart.data.datasets[0].pointHoverBackgroundColor = lineColor;
+                        equityChart.update('none');
+                    }
+                };
+
+                // 监听时间范围变化
+                Vue.watch(chartTimeRange, () => {
+                    updateEquityChart();
+                });
+
                 onMounted(() => {
                     fetchData();
                     fetchHistory();
+                    fetchStrategies();
+                    fetchTradeStats();
+                    fetchEquityHistory();
                     setInterval(() => {
                         fetchData();
                         fetchHistory();
                     }, 2000);
+                    setInterval(() => {
+                        fetchTradeStats();
+                        fetchEquityHistory();
+                    }, 10000);
                 });
 
                 const formatMoney = (val) => {
@@ -714,6 +1123,102 @@
                     return data.PriceChange1h || 0;
                 };
 
+                // 策略显示名称映射
+                const strategyDisplayNames = {
+                    'balanced': '平衡策略',
+                    'aggressive': '激进策略',
+                    'conservative': '保守策略',
+                    'scalping': '剥头皮策略'
+                };
+
+                // 获取策略列表
+                const fetchStrategies = async () => {
+                    try {
+                        const res = await fetch('/api/strategies');
+                        const data = await res.json();
+                        if (data && data.strategies) {
+                            strategies.value = data.strategies.map(s => ({
+                                ...s,
+                                display_name: strategyDisplayNames[s.name] || s.name
+                            }));
+                        }
+                        if (data && data.active) {
+                            activeStrategy.value = data.active;
+                            // 获取当前激活策略的参数
+                            const activeStrat = strategies.value.find(s => s.name === data.active);
+                            if (activeStrat) {
+                                activeStrategyParams.value = activeStrat.risk_params;
+                            }
+                        }
+                    } catch (e) {
+                        console.error("Fetch strategies error", e);
+                    }
+                };
+
+                // 切换策略
+                const switchStrategy = async (name) => {
+                    strategyMessage.value = '';
+                    strategyError.value = false;
+                    try {
+                        const res = await fetch('/api/strategy/switch', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ name })
+                        });
+                        const data = await res.json();
+                        if (!res.ok) {
+                            strategyMessage.value = data.error || '切换失败';
+                            strategyError.value = true;
+                        } else {
+                            activeStrategy.value = name;
+                            // 更新当前激活策略的参数
+                            const activeStrat = strategies.value.find(s => s.name === name);
+                            if (activeStrat) {
+                                activeStrategyParams.value = activeStrat.risk_params;
+                            }
+                            strategyMessage.value = '策略已切换';
+                            strategyError.value = false;
+                        }
+                    } catch (e) {
+                        console.error(e);
+                        strategyMessage.value = '请求失败';
+                        strategyError.value = true;
+                    }
+                };
+
+                // 获取交易统计
+                const fetchTradeStats = async () => {
+                    try {
+                        const res = await fetch('/api/trade_stats');
+                        const data = await res.json();
+                        tradeStats.value = data;
+                    } catch (e) {
+                        console.error("Fetch trade stats error", e);
+                    }
+                };
+
+                // 导出数据
+                const exportData = async (type, format) => {
+                    exportMessage.value = '';
+                    exportError.value = false;
+                    try {
+                        const endpoint = type === 'equity' ? '/api/export/equity' : '/api/export/trades';
+                        const res = await fetch(`${endpoint}?format=${format}`);
+                        const data = await res.json();
+                        if (!res.ok) {
+                            exportMessage.value = data.error || '导出失败';
+                            exportError.value = true;
+                        } else {
+                            exportMessage.value = `已导出到: ${data.file}`;
+                            exportError.value = false;
+                        }
+                    } catch (e) {
+                        console.error(e);
+                        exportMessage.value = '请求失败';
+                        exportError.value = true;
+                    }
+                };
+
                 return {
                     state,
                     marketData,
@@ -740,7 +1245,24 @@
                     confirmCloseAll,
                     selectedHistoryItem,
                     openHistoryDetail,
-                    closeHistoryDetail
+                    closeHistoryDetail,
+                    // Settings modal
+                    showSettingsModal,
+                    strategies,
+                    activeStrategy,
+                    activeStrategyParams,
+                    strategyMessage,
+                    strategyError,
+                    switchStrategy,
+                    tradeStats,
+                    exportMessage,
+                    exportError,
+                    exportData,
+                    // Equity chart
+                    equityChartRef,
+                    equityHistory,
+                    chartTimeRange,
+                    chartStats
                 };
             }
         }).mount('#app');

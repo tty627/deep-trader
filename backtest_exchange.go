@@ -471,7 +471,24 @@ func (b *BacktestExchange) ExecuteDecision(d Decision) error {
 
 		pct := d.ClosePercentage / 100.0
 		if pct <= 0 {
-			return fmt.Errorf("invalid close percentage: %.2f", d.ClosePercentage)
+			// 兼容仅提供 position_size_usd 的情况：根据当前持仓名义价值推导出比例
+			if d.PositionSizeUSD > 0 {
+				notional := pos.Quantity * price
+				if notional <= 0 {
+					return fmt.Errorf("cannot derive close percentage for %s: notional<=0 (qty=%.6f, price=%.6f)", d.Symbol, pos.Quantity, price)
+				}
+				pct = d.PositionSizeUSD / notional
+				if pct <= 0 {
+					return fmt.Errorf("invalid partial close notional for %s: position_size_usd=%.2f, notional=%.2f", d.Symbol, d.PositionSizeUSD, notional)
+				}
+				if pct > 1 {
+					pct = 1
+				}
+				// 回写推导出的百分比，方便后续日志/历史记录查看
+				d.ClosePercentage = pct * 100
+			} else {
+				return fmt.Errorf("invalid close percentage: %.2f", d.ClosePercentage)
+			}
 		}
 		if pct > 1 {
 			pct = 1

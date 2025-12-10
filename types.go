@@ -173,9 +173,17 @@ type Context struct {
 }
 
 // Decision AI的交易决策
+// 说明：
+// - Action 是主要的行为字段，仅支持少量标准值（open_long/open_short/close_long/close_short/...）；
+// - Side 仅用于兼容模型可能输出的 "open_position" + "side" 方案，后端会在归一化阶段将其映射为标准 Action；
+// - 其余未在协议中列出但模型可能输出的字段，一律在解析阶段静默忽略。
 type Decision struct {
 	Symbol string `json:"symbol"` // 交易对象
 	Action string `json:"action"` // 动作: "open_long", "open_short", "close_long", "close_short", "wait", etc.
+
+	// 可选：方向字段，仅用于兼容 "open_position" + "side" 风格的输出
+	// 允许取值如 "long" / "short" / "buy" / "sell"，归一化逻辑会将其映射为标准 Action
+	Side string `json:"side,omitempty"`
 
 	// 开仓参数
 	Leverage        int     `json:"leverage,omitempty"`            // 建议杠杆倍数
@@ -195,7 +203,8 @@ type Decision struct {
 	ExecError  string `json:"exec_error,omitempty"`  // 失败时的错误信息
 
 	// 通用参数
-	Confidence            int     `json:"confidence,omitempty"`             // AI 信心度 (0-100)
+	// Confidence 允许使用 0-1 或 0-100 的小数，后端仅做展示，不参与风控计算
+	Confidence            float64 `json:"confidence,omitempty"`             // AI 信心度 (0-1 或 0-100)
 	RiskUSD               float64 `json:"risk_usd,omitempty"`               // 预估最大风险金额 (USDT)
 	InvalidationCondition string  `json:"invalidation_condition,omitempty"` // 失效条件
 	Reasoning             string  `json:"reasoning"`                        // 决策理由摘要

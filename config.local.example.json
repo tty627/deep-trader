@@ -8,5 +8,51 @@
   "altcoin_leverage": 20,
   "binance_api_key": "your_binance_api_key_here",
   "binance_secret_key": "your_binance_secret_key_here",
-  "binance_proxy_url": "http://127.0.0.1:7890"
+  "binance_proxy_url": "http://127.0.0.1:7890",
+
+  "notifications": {
+    "enabled": true,
+    "telegram": {
+      "enabled": false,
+      "bot_token": "your_telegram_bot_token",
+      "chat_id": "your_chat_id"
+    },
+    "discord": {
+      "enabled": false,
+      "webhook_url": "https://discord.com/api/webhooks/xxx/yyy"
+    },
+    "email": {
+      "enabled": false,
+      "smtp_host": "smtp.gmail.com",
+      "smtp_port": 587,
+      "username": "your_email@gmail.com",
+      "password": "your_app_password",
+      "from": "your_email@gmail.com",
+      "to": ["recipient@example.com"]
+    }
+  },
+
+  "ai_models": [
+    {
+      "name": "deepseek-primary",
+      "api_key": "your_deepseek_api_key",
+      "api_url": "https://api.deepseek.com/v1/chat/completions",
+      "model": "deepseek-chat",
+      "weight": 1.0,
+      "enabled": true
+    },
+    {
+      "name": "openai-gpt4",
+      "api_key": "your_openai_api_key",
+      "api_url": "https://api.openai.com/v1/chat/completions",
+      "model": "gpt-4-turbo",
+      "weight": 0.8,
+      "enabled": false
+    }
+  ],
+  "ai_mode": "primary",
+
+  "active_strategy": "balanced",
+
+  "database_path": "deep_trader.db"
 }

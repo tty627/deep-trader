@@ -1,2 +1,47 @@
 # 本地敏感配置
 config.local.json
+
+# Go build artifacts / executables
+deep_trader
+deep_trader.exe
+simple_ai_trader
+simple_ai_trader.exe
+
+# Runtime data / logs
+trade_history.json
+position_open_time.json
+cycle_log.jsonl
+trader.log
+detailed_log.txt
+*.log
+
+# Backtest / data folders (large, regenerable)
+backtest_data/
+data/
+
+# Local backup / temp files
+*.backup
+=
+
+# Exports
+exports/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Warp / misc
+WARP.md
